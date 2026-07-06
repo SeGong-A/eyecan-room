@@ -1,10 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useAppStore, type ScanTarget } from './store/useAppStore';
 
 const scanItems: Record<ScanTarget, string[]> = {
   FAN: ['ON', 'OFF', 'LOW', 'MID', 'HIGH'],
   TV: ['POWER', 'CH +', 'CH -', 'VOL +', 'VOL -'],
   CURTAIN: ['OPEN', 'CLOSE', 'STOP']
+};
+
+const gazeSamples: Record<'LEFT' | 'CENTER' | 'RIGHT', { x: number; y: number }> = {
+  LEFT: { x: 0.28, y: 0.5 },
+  CENTER: { x: 0.5, y: 0.5 },
+  RIGHT: { x: 0.72, y: 0.5 }
 };
 
 function App() {
@@ -18,8 +24,58 @@ function App() {
   const setIsCalibrated = useAppStore((state) => state.setIsCalibrated);
   const setScanStep = useAppStore((state) => state.setScanStep);
   const setConnectionState = useAppStore((state) => state.setConnectionState);
+  const syncFromServer = useAppStore((state) => state.syncFromServer);
 
   const scanList = useMemo(() => scanItems[selectedTarget], [selectedTarget]);
+
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/state`);
+
+    socket.addEventListener('open', () => {
+      setConnectionState('STREAMING');
+    });
+
+    socket.addEventListener('message', (event) => {
+      const payload = JSON.parse(event.data) as {
+        gaze_direction?: 'LEFT' | 'CENTER' | 'RIGHT';
+        selected_target?: ScanTarget;
+        scan_step?: number;
+        connection_state?: 'DISCONNECTED' | 'READY' | 'STREAMING';
+        last_blink_event?: 'NONE' | 'SHORT' | 'SELECT' | 'CANCEL';
+        last_gaze_point_x?: number;
+        last_gaze_point_y?: number;
+      };
+
+      syncFromServer(payload);
+    });
+
+    socket.addEventListener('close', () => {
+      setConnectionState('DISCONNECTED');
+    });
+
+    socket.addEventListener('error', () => {
+      setConnectionState('DISCONNECTED');
+    });
+
+    return () => {
+      socket.close();
+    };
+  }, [setConnectionState, syncFromServer]);
+
+  async function postReadyState() {
+    const response = await fetch('/state/ready', { method: 'POST' });
+    const data = (await response.json()) as { connection_state?: 'DISCONNECTED' | 'READY' | 'STREAMING' };
+    if (data.connection_state) {
+      setConnectionState(data.connection_state);
+    }
+  }
+
+  async function postGazeSample(direction: 'LEFT' | 'CENTER' | 'RIGHT') {
+    const sample = gazeSamples[direction];
+    await fetch(`/events/gaze?x=${sample.x}&y=${sample.y}`, { method: 'POST' });
+    setGazeDirection(direction);
+  }
 
   return (
     <main className="shell">
@@ -35,7 +91,7 @@ function App() {
         <div className="status-card">
           <span>Connection</span>
           <strong>{connectionState}</strong>
-          <button type="button" onClick={() => setConnectionState('READY')}>Mark ready</button>
+          <button type="button" onClick={() => void postReadyState()}>Mark ready</button>
         </div>
       </section>
 
@@ -69,9 +125,9 @@ function App() {
           </div>
 
           <div className="button-row">
-            <button type="button" onClick={() => setGazeDirection('LEFT')}>Simulate Left</button>
-            <button type="button" onClick={() => setGazeDirection('CENTER')}>Simulate Center</button>
-            <button type="button" onClick={() => setGazeDirection('RIGHT')}>Simulate Right</button>
+            <button type="button" onClick={() => void postGazeSample('LEFT')}>Simulate Left</button>
+            <button type="button" onClick={() => void postGazeSample('CENTER')}>Simulate Center</button>
+            <button type="button" onClick={() => void postGazeSample('RIGHT')}>Simulate Right</button>
           </div>
 
           <div className="button-row">
