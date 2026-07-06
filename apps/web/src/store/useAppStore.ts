@@ -11,10 +11,11 @@ type AppState = {
   connectionState: 'DISCONNECTED' | 'READY' | 'STREAMING';
   lastBlinkEvent: 'NONE' | 'SHORT' | 'SELECT' | 'CANCEL';
   lastGazePoint: { x: number; y: number };
+  lastCommand: string;
   setGazeDirection: (direction: GazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setIsCalibrated: (value: boolean) => void;
-  setScanStep: (value: number) => void;
+  setScanStep: (value: number | ((current: number) => number)) => void;
   setConnectionState: (value: AppState['connectionState']) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: GazeDirection;
@@ -24,6 +25,7 @@ type AppState = {
     last_blink_event: AppState['lastBlinkEvent'];
     last_gaze_point_x: number;
     last_gaze_point_y: number;
+    last_command: string;
   }>) => void;
 };
 
@@ -35,10 +37,14 @@ export const useAppStore = create<AppState>((set) => ({
   connectionState: 'DISCONNECTED',
   lastBlinkEvent: 'NONE',
   lastGazePoint: { x: 0.5, y: 0.5 },
+  lastCommand: 'NONE',
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setIsCalibrated: (isCalibrated) => set({ isCalibrated }),
-  setScanStep: (scanStep) => set({ scanStep }),
+  setScanStep: (scanStep) =>
+    set((state) => ({
+      scanStep: typeof scanStep === 'function' ? scanStep(state.scanStep) : scanStep
+    })),
   setConnectionState: (connectionState) => set({ connectionState }),
   syncFromServer: (payload) =>
     set((state) => ({
@@ -47,6 +53,7 @@ export const useAppStore = create<AppState>((set) => ({
       scanStep: payload.scan_step ?? state.scanStep,
       connectionState: payload.connection_state ?? state.connectionState,
       lastBlinkEvent: payload.last_blink_event ?? state.lastBlinkEvent,
+      lastCommand: payload.last_command ?? state.lastCommand,
       lastGazePoint: {
         x: payload.last_gaze_point_x ?? state.lastGazePoint.x,
         y: payload.last_gaze_point_y ?? state.lastGazePoint.y

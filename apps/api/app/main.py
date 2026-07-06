@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .blink import BlinkEventType, BlinkStateMachine
-from .gaze import GazeClassifier, GazeDirection, GazePoint
+from .gaze import GazeClassifier, GazePoint
 
 
 @dataclass
@@ -18,6 +18,7 @@ class ControlState:
     last_blink_event: str = BlinkEventType.NONE.value
     last_gaze_point_x: float = 0.5
     last_gaze_point_y: float = 0.5
+    last_command: str = "NONE"
 
 
 app = FastAPI(title="EyeCan Room API", version="0.1.0")
@@ -83,6 +84,13 @@ async def receive_gaze_event(x: float, y: float) -> dict[str, object]:
     state.last_gaze_point_y = y
     await broadcast_state()
     return {"direction": direction.value, "state": asdict(state)}
+
+
+@app.post("/events/command")
+async def receive_command(command: str) -> dict[str, object]:
+    state.last_command = command
+    await broadcast_state()
+    return {"command": command, "state": asdict(state)}
 
 
 @app.websocket("/ws/state")

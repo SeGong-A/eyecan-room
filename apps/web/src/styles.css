@@ -141,6 +141,12 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.status-line {
+  color: #9fb4c8;
+  font-size: 0.92rem;
+  margin-top: 0.75rem;
+}
+
 .flow-item,
 .scan-item {
   flex: 1;

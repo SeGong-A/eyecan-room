@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useAppStore, type ScanTarget } from './store/useAppStore';
 
 const scanItems: Record<ScanTarget, string[]> = {
@@ -19,6 +19,7 @@ function App() {
   const isCalibrated = useAppStore((state) => state.isCalibrated);
   const scanStep = useAppStore((state) => state.scanStep);
   const connectionState = useAppStore((state) => state.connectionState);
+  const lastCommand = useAppStore((state) => state.lastCommand);
   const setGazeDirection = useAppStore((state) => state.setGazeDirection);
   const setSelectedTarget = useAppStore((state) => state.setSelectedTarget);
   const setIsCalibrated = useAppStore((state) => state.setIsCalibrated);
@@ -27,6 +28,8 @@ function App() {
   const syncFromServer = useAppStore((state) => state.syncFromServer);
 
   const scanList = useMemo(() => scanItems[selectedTarget], [selectedTarget]);
+  const gazeHoldStartRef = useRef<number | null>(null);
+  const lastDirectionRef = useRef(gazeDirection);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -45,6 +48,7 @@ function App() {
         last_blink_event?: 'NONE' | 'SHORT' | 'SELECT' | 'CANCEL';
         last_gaze_point_x?: number;
         last_gaze_point_y?: number;
+        last_command?: string;
       };
 
       syncFromServer(payload);
@@ -62,6 +66,65 @@ function App() {
       socket.close();
     };
   }, [setConnectionState, syncFromServer]);
+
+  useEffect(() => {
+    lastDirectionRef.current = gazeDirection;
+  }, [gazeDirection]);
+
+  useEffect(() => {
+    const directionToCommand: Record<'LEFT' | 'CENTER' | 'RIGHT', string> = {
+      LEFT: 'CAM_LEFT',
+      CENTER: 'CAM_STOP',
+      RIGHT: 'CAM_RIGHT'
+    };
+
+    const timerId = window.setInterval(() => {
+      if (connectionState !== 'STREAMING') {
+        gazeHoldStartRef.current = null;
+        return;
+      }
+
+      const currentDirection = gazeDirection;
+      const now = Date.now();
+
+      if (lastDirectionRef.current !== currentDirection) {
+        lastDirectionRef.current = currentDirection;
+        gazeHoldStartRef.current = now;
+        return;
+      }
+
+      if (gazeHoldStartRef.current === null) {
+        gazeHoldStartRef.current = now;
+        return;
+      }
+
+      const heldForMs = now - gazeHoldStartRef.current;
+      if (heldForMs < 1000) {
+        return;
+      }
+
+      void fetch(`/events/command?command=${directionToCommand[currentDirection]}`, { method: 'POST' });
+      gazeHoldStartRef.current = now;
+    }, 250);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [connectionState, gazeDirection]);
+
+  useEffect(() => {
+    if (!isCalibrated) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setScanStep((currentStep) => (currentStep + 1) % scanList.length);
+    }, 1200);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [isCalibrated, scanList.length, setScanStep]);
 
   async function postReadyState() {
     const response = await fetch('/state/ready', { method: 'POST' });
@@ -148,6 +211,7 @@ function App() {
               </div>
             ))}
           </div>
+          <div className="status-line">Last command: {lastCommand}</div>
         </article>
       </section>
     </main>
