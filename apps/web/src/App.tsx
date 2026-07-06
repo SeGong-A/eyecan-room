@@ -30,6 +30,7 @@ function App() {
   const scanList = useMemo(() => scanItems[selectedTarget], [selectedTarget]);
   const gazeHoldStartRef = useRef<number | null>(null);
   const lastDirectionRef = useRef(gazeDirection);
+  const lastDispatchedDirectionRef = useRef<'LEFT' | 'CENTER' | 'RIGHT' | null>(null);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -90,6 +91,7 @@ function App() {
       if (lastDirectionRef.current !== currentDirection) {
         lastDirectionRef.current = currentDirection;
         gazeHoldStartRef.current = now;
+        lastDispatchedDirectionRef.current = null;
         return;
       }
 
@@ -103,7 +105,12 @@ function App() {
         return;
       }
 
+      if (lastDispatchedDirectionRef.current === currentDirection) {
+        return;
+      }
+
       void fetch(`/events/command?command=${directionToCommand[currentDirection]}`, { method: 'POST' });
+      lastDispatchedDirectionRef.current = currentDirection;
       gazeHoldStartRef.current = now;
     }, 250);
 
