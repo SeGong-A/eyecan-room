@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useCamera, type CameraStatus } from './hooks/useCamera';
 import {
   useAppStore,
@@ -206,6 +206,8 @@ function App() {
 
   const currentItem = scanList[store.scanStep];
   const cameraReady = camera.status === 'READY';
+  const radialStepAngle = 360 / scanList.length;
+  const radialRotation = -store.scanStep * radialStepAngle;
 
   return (
     <main className={store.isPaused ? 'app app-paused' : 'app'}>
@@ -244,31 +246,77 @@ function App() {
             <span>●</span> 시선 · {directionLabel[store.gazeDirection]}
           </div>
 
+          <div className="object-lock" aria-live="polite">
+            <span>{targetMeta[store.selectedTarget].icon}</span>
+            <div>
+              <small>중앙 감지 대상</small>
+              <strong>{targetMeta[store.selectedTarget].name}</strong>
+            </div>
+          </div>
+
           {store.interactionMode === 'COMMAND' && (
-            <section className="scan-overlay" aria-live="polite">
-              <div className="scan-heading">
-                <span className="target-icon">{targetMeta[store.selectedTarget].icon}</span>
-                <div><small>{targetMeta[store.selectedTarget].name}</small><h1>원하는 동작을 선택하세요</h1></div>
+            <section className="radial-overlay" aria-live="polite">
+              <header className="radial-heading">
+                <small>{targetMeta[store.selectedTarget].name} 제어</small>
+                <h1>명령이 돌아가며 선택됩니다</h1>
+                <p>원하는 명령이 위에 오면 길게 눈을 감으세요.</p>
+              </header>
+
+              <div className="radial-selector">
+                <div className="selection-marker">
+                  <span>선택 위치</span>
+                  <i />
+                </div>
+                <div
+                  className="command-wheel"
+                  style={{ '--wheel-rotation': `${radialRotation}deg` } as CSSProperties}
+                >
+                  {scanList.map((item, index) => {
+                    const angle = index * radialStepAngle;
+                    const counterRotation = -(radialRotation + angle);
+                    return (
+                      <div
+                        className={index === store.scanStep ? 'radial-command active' : 'radial-command'}
+                        key={item.command}
+                        style={{
+                          '--item-angle': `${angle}deg`,
+                          '--counter-rotation': `${counterRotation}deg`
+                        } as CSSProperties}
+                      >
+                        <strong>{item.label}</strong>
+                        <span>{item.description}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="radial-center">
+                  <span>{targetMeta[store.selectedTarget].icon}</span>
+                  <strong>{targetMeta[store.selectedTarget].name}</strong>
+                  <small>{currentItem.label} 선택 대기</small>
+                </div>
+                <svg className="radial-timer" viewBox="0 0 120 120" aria-hidden="true">
+                  <circle cx="60" cy="60" r="56" />
+                  <circle key={store.scanStep} className="timer-progress" cx="60" cy="60" r="56" style={{ animationDuration: `${store.scanIntervalMs}ms` }} />
+                </svg>
               </div>
-              <div className="scan-grid">
-                {scanList.map((item, index) => (
-                  <div className={index === store.scanStep ? 'command-card active' : 'command-card'} key={item.command}>
-                    <strong>{item.label}</strong><span>{item.description}</span>
-                    {index === store.scanStep && <em>지금 길게 눈 감기</em>}
-                  </div>
-                ))}
+              <div className="radial-current">
+                <span className="blink-symbol">◉</span>
+                <div>
+                  <small>현재 명령</small>
+                  <strong>{currentItem.label}</strong>
+                </div>
+                <em>길게 눈 감아 선택</em>
               </div>
-              <div className="scan-progress"><span key={store.scanStep} style={{ animationDuration: `${store.scanIntervalMs}ms` }} /></div>
             </section>
           )}
 
-          <nav className="target-dock" aria-label="테스트 대상 선택">
+          {showSimulator && <nav className="target-dock" aria-label="테스트 대상 선택">
             {(Object.keys(targetMeta) as ScanTarget[]).map((target) => (
               <button className={target === store.selectedTarget ? 'active' : ''} key={target} type="button" onClick={() => void selectTarget(target)}>
                 <span>{targetMeta[target].icon}</span>{targetMeta[target].name}
               </button>
             ))}
-          </nav>
+          </nav>}
         </div>
 
         <aside className="side-panel">
