@@ -2,8 +2,8 @@ import { create } from 'zustand';
 
 export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT';
 export type FullGazeDirection = GazeDirection | 'UP' | 'DOWN';
-export type ScanTarget = 'FAN' | 'LIGHT' | 'TV' | 'CURTAIN';
-export type InteractionMode = 'EXPLORE' | 'COMMAND';
+export type ScanTarget = 'FAN' | 'LIGHT' | 'TV' | 'CURTAIN' | 'WINDOW';
+export type InteractionMode = 'EXPLORE' | 'TARGET_CHOICE' | 'COMMAND';
 
 type AppState = {
   gazeDirection: FullGazeDirection;

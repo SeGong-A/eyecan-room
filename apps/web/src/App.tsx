@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useCamera, type CameraStatus } from './hooks/useCamera';
 import {
   useAppStore,
@@ -8,13 +8,28 @@ import {
 } from './store/useAppStore';
 
 type CommandItem = { label: string; description: string; command: string };
+type FocusTarget = 'FAN' | 'LIGHT' | 'TV' | 'WINDOW_AREA';
 
 const targetMeta: Record<ScanTarget, { name: string; icon: string }> = {
   FAN: { name: '선풍기', icon: '✣' },
   LIGHT: { name: '조명', icon: '☀' },
   TV: { name: 'TV', icon: '▣' },
-  CURTAIN: { name: '커튼', icon: '▥' }
+  CURTAIN: { name: '커튼', icon: '▥' },
+  WINDOW: { name: '창문', icon: '▦' }
 };
+
+const focusTargetMeta: Record<FocusTarget, { name: string; icon: string }> = {
+  FAN: targetMeta.FAN,
+  LIGHT: targetMeta.LIGHT,
+  TV: targetMeta.TV,
+  WINDOW_AREA: { name: '커튼 · 창문', icon: '▥' }
+};
+
+const targetChoiceItems: CommandItem[] = [
+  { label: '커튼', description: '커튼을 제어합니다', command: 'TARGET_CURTAIN' },
+  { label: '창문', description: '창문을 제어합니다', command: 'TARGET_WINDOW' },
+  { label: '돌아가기', description: '방 둘러보기로 돌아갑니다', command: 'BACK' }
+];
 
 const scanItems: Record<ScanTarget, CommandItem[]> = {
   FAN: [
@@ -44,6 +59,12 @@ const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '열기', description: '커튼을 엽니다', command: 'CURTAIN_OPEN' },
     { label: '닫기', description: '커튼을 닫습니다', command: 'CURTAIN_CLOSE' },
     { label: '멈춤', description: '커튼을 멈춥니다', command: 'CURTAIN_STOP' },
+    { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
+  ],
+  WINDOW: [
+    { label: '열기', description: '창문을 엽니다', command: 'WINDOW_OPEN' },
+    { label: '닫기', description: '창문을 닫습니다', command: 'WINDOW_CLOSE' },
+    { label: '멈춤', description: '창문을 멈춥니다', command: 'WINDOW_STOP' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ]
 };
@@ -82,7 +103,11 @@ function App() {
   const [showSimulator, setShowSimulator] = useState(false);
   const [toast, setToast] = useState('');
   const [tvState, setTvState] = useState({ power: false, channel: 7, volume: 18 });
-  const scanList = useMemo(() => scanItems[store.selectedTarget], [store.selectedTarget]);
+  const [focusedTarget, setFocusedTarget] = useState<FocusTarget>('TV');
+  const scanList = useMemo(
+    () => store.interactionMode === 'TARGET_CHOICE' ? targetChoiceItems : scanItems[store.selectedTarget],
+    [store.interactionMode, store.selectedTarget]
+  );
   const gazeHoldStartRef = useRef<number | null>(null);
   const lastDirectionRef = useRef(store.gazeDirection);
   const lastDispatchedDirectionRef = useRef<FullGazeDirection | null>(null);
@@ -123,7 +148,7 @@ function App() {
   }, [store.connectionState, store.gazeDirection, store.interactionMode, store.isCalibrated, store.isPaused]);
 
   useEffect(() => {
-    if (!store.isCalibrated || store.isPaused || store.interactionMode !== 'COMMAND') return;
+    if (!store.isCalibrated || store.isPaused || store.interactionMode === 'EXPLORE') return;
     const timerId = window.setInterval(
       () => store.setScanStep((step) => (step + 1) % scanList.length),
       store.scanIntervalMs
@@ -141,14 +166,22 @@ function App() {
     }
     if (store.lastBlinkEvent !== 'SELECT' || !store.isCalibrated || store.isPaused) return;
     if (store.interactionMode === 'EXPLORE') {
-      store.setInteractionMode('COMMAND');
-      void fetch('/state/mode?mode=COMMAND', { method: 'POST' });
+      const nextMode: InteractionMode = focusedTarget === 'WINDOW_AREA' ? 'TARGET_CHOICE' : 'COMMAND';
+      store.setInteractionMode(nextMode);
+      void fetch(`/state/mode?mode=${nextMode}`, { method: 'POST' });
       return;
     }
     const item = scanList[store.scanStep];
-    if (!item || item.command === 'CANCEL') {
+    if (!item || item.command === 'CANCEL' || item.command === 'BACK') {
       store.setInteractionMode('EXPLORE');
       void fetch('/state/mode?mode=EXPLORE', { method: 'POST' });
+      return;
+    }
+    if (store.interactionMode === 'TARGET_CHOICE') {
+      const selectedTarget: ScanTarget = item.command === 'TARGET_WINDOW' ? 'WINDOW' : 'CURTAIN';
+      store.setSelectedTarget(selectedTarget);
+      store.setInteractionMode('COMMAND');
+      void chooseSharedTarget(selectedTarget);
       return;
     }
     void postCommand(item.command);
@@ -176,6 +209,18 @@ function App() {
   async function selectTarget(target: ScanTarget) {
     store.setSelectedTarget(target);
     await fetch(`/state/target?target=${target}`, { method: 'POST' });
+  }
+  async function chooseSharedTarget(target: ScanTarget) {
+    await fetch(`/state/target?target=${target}`, { method: 'POST' });
+    await fetch('/state/mode?mode=COMMAND', { method: 'POST' });
+  }
+  async function selectFocusTarget(target: FocusTarget) {
+    setFocusedTarget(target);
+    if (target !== 'WINDOW_AREA') {
+      await selectTarget(target);
+    }
+    store.setInteractionMode('EXPLORE');
+    await fetch('/state/mode?mode=EXPLORE', { method: 'POST' });
   }
   async function simulateBlink(durationMs: number) {
     const now = Date.now();
@@ -206,6 +251,12 @@ function App() {
 
   const currentItem = scanList[store.scanStep];
   const cameraReady = camera.status === 'READY';
+  const radialStepAngle = 360 / scanList.length;
+  const radialRotation = -store.scanStep * radialStepAngle;
+  const isTargetChoice = store.interactionMode === 'TARGET_CHOICE';
+  const radialTarget = isTargetChoice
+    ? focusTargetMeta.WINDOW_AREA
+    : targetMeta[store.selectedTarget];
 
   return (
     <main className={store.isPaused ? 'app app-paused' : 'app'}>
@@ -238,37 +289,83 @@ function App() {
 
           <div className="focus-zone" aria-hidden="true">
             <i /><i /><i /><i />
-            <span>{store.interactionMode === 'COMMAND' ? '선택됨' : '중앙에 맞춘 뒤 길게 눈을 감으세요'}</span>
+            <span>{store.interactionMode !== 'EXPLORE' ? '선택됨' : '중앙에 맞춘 뒤 길게 눈을 감으세요'}</span>
           </div>
           <div className={`gaze-pill gaze-${store.gazeDirection.toLowerCase()}`}>
             <span>●</span> 시선 · {directionLabel[store.gazeDirection]}
           </div>
 
-          {store.interactionMode === 'COMMAND' && (
-            <section className="scan-overlay" aria-live="polite">
-              <div className="scan-heading">
-                <span className="target-icon">{targetMeta[store.selectedTarget].icon}</span>
-                <div><small>{targetMeta[store.selectedTarget].name}</small><h1>원하는 동작을 선택하세요</h1></div>
+          <div className="object-lock" aria-live="polite">
+            <span>{focusTargetMeta[focusedTarget].icon}</span>
+            <div>
+              <small>중앙 감지 대상</small>
+              <strong>{focusTargetMeta[focusedTarget].name}</strong>
+            </div>
+          </div>
+
+          {store.interactionMode !== 'EXPLORE' && (
+            <section className="radial-overlay" aria-live="polite">
+              <header className="radial-heading">
+                <small>{isTargetChoice ? '제어 대상 선택' : `${radialTarget.name} 제어`}</small>
+                <h1>{isTargetChoice ? '무엇을 제어할까요?' : '명령이 돌아가며 선택됩니다'}</h1>
+                <p>{isTargetChoice ? '커튼과 창문 중 원하는 대상을 먼저 선택하세요.' : '원하는 명령이 위에 오면 길게 눈을 감으세요.'}</p>
+              </header>
+
+              <div className="radial-selector">
+                <div className="selection-marker">
+                  <span>선택 위치</span>
+                  <i />
+                </div>
+                <div
+                  className="command-wheel"
+                  style={{ '--wheel-rotation': `${radialRotation}deg` } as CSSProperties}
+                >
+                  {scanList.map((item, index) => {
+                    const angle = index * radialStepAngle;
+                    const counterRotation = -(radialRotation + angle);
+                    return (
+                      <div
+                        className={index === store.scanStep ? 'radial-command active' : 'radial-command'}
+                        key={item.command}
+                        style={{
+                          '--item-angle': `${angle}deg`,
+                          '--counter-rotation': `${counterRotation}deg`
+                        } as CSSProperties}
+                      >
+                        <strong>{item.label}</strong>
+                        <span>{item.description}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="radial-center">
+                  <span>{radialTarget.icon}</span>
+                  <strong>{radialTarget.name}</strong>
+                  <small>{currentItem.label} 선택 대기</small>
+                </div>
+                <svg className="radial-timer" viewBox="0 0 120 120" aria-hidden="true">
+                  <circle cx="60" cy="60" r="56" />
+                  <circle key={store.scanStep} className="timer-progress" cx="60" cy="60" r="56" style={{ animationDuration: `${store.scanIntervalMs}ms` }} />
+                </svg>
               </div>
-              <div className="scan-grid">
-                {scanList.map((item, index) => (
-                  <div className={index === store.scanStep ? 'command-card active' : 'command-card'} key={item.command}>
-                    <strong>{item.label}</strong><span>{item.description}</span>
-                    {index === store.scanStep && <em>지금 길게 눈 감기</em>}
-                  </div>
-                ))}
+              <div className="radial-current">
+                <span className="blink-symbol">◉</span>
+                <div>
+                  <small>{isTargetChoice ? '현재 대상' : '현재 명령'}</small>
+                  <strong>{currentItem.label}</strong>
+                </div>
+                <em>길게 눈 감아 선택</em>
               </div>
-              <div className="scan-progress"><span key={store.scanStep} style={{ animationDuration: `${store.scanIntervalMs}ms` }} /></div>
             </section>
           )}
 
-          <nav className="target-dock" aria-label="테스트 대상 선택">
-            {(Object.keys(targetMeta) as ScanTarget[]).map((target) => (
-              <button className={target === store.selectedTarget ? 'active' : ''} key={target} type="button" onClick={() => void selectTarget(target)}>
-                <span>{targetMeta[target].icon}</span>{targetMeta[target].name}
+          {showSimulator && <nav className="target-dock" aria-label="테스트 대상 선택">
+            {(Object.keys(focusTargetMeta) as FocusTarget[]).map((target) => (
+              <button className={target === focusedTarget ? 'active' : ''} key={target} type="button" onClick={() => void selectFocusTarget(target)}>
+                <span>{focusTargetMeta[target].icon}</span>{focusTargetMeta[target].name}
               </button>
             ))}
-          </nav>
+          </nav>}
         </div>
 
         <aside className="side-panel">
@@ -313,7 +410,7 @@ function App() {
 
       {store.isPaused && <div className="pause-screen"><span>Ⅱ</span><h1>잠시 쉬는 중이에요</h1><p>다시 2초 동안 눈을 감으면 시작합니다.</p><button type="button" onClick={() => void simulateBlink(2100)}>화면 눌러 다시 시작</button></div>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
-      {store.interactionMode === 'COMMAND' && <div className="sr-only" aria-live="assertive">{currentItem.label} 항목이 선택 대기 중입니다.</div>}
+      {store.interactionMode !== 'EXPLORE' && <div className="sr-only" aria-live="assertive">{currentItem.label} 항목이 선택 대기 중입니다.</div>}
     </main>
   );
 }

@@ -6,7 +6,7 @@
   "panPresets": {
     "LEFT": "FAN",
     "CENTER": "TV",
-    "RIGHT": "CURTAIN",
+    "RIGHT": "WINDOW_AREA",
     "UP": "LIGHT",
     "DOWN": "TV"
   },
