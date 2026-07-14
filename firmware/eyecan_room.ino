@@ -78,6 +78,8 @@ void handleCommand(const String &command) {
     closeCurtain();
   } else if (command == "CURTAIN_STOP") {
     stopCurtain();
+  } else if (command == "WINDOW_OPEN" || command == "WINDOW_CLOSE" || command == "WINDOW_STOP") {
+    // Window motor pins and driver will be assigned after hardware selection.
   } else if (command == "TV_POWER" || command == "TV_CH_UP" || command == "TV_CH_DOWN" || command == "TV_VOL_UP" || command == "TV_VOL_DOWN") {
     // TV commands are handled by the web mock for the MVP.
   }

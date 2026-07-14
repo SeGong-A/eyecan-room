@@ -9,6 +9,7 @@ Arduino or ESP32 firmware for the EyeCan Room demo hardware.
 - Control fan speed with PWM
 - Control light brightness with PWM
 - Control curtain motion
+- Receive window commands (motor pins will be assigned after hardware selection)
 
 ## Command examples
 
@@ -22,3 +23,11 @@ Arduino or ESP32 firmware for the EyeCan Room demo hardware.
 - `FAN_LOW`
 - `FAN_MID`
 - `FAN_HIGH`
+- `LIGHT_ON`
+- `LIGHT_OFF`
+- `CURTAIN_OPEN`
+- `CURTAIN_CLOSE`
+- `CURTAIN_STOP`
+- `WINDOW_OPEN`
+- `WINDOW_CLOSE`
+- `WINDOW_STOP`
