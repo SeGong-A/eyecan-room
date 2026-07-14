@@ -6,11 +6,15 @@
   "panPresets": {
     "LEFT": "FAN",
     "CENTER": "TV",
-    "RIGHT": "CURTAIN"
+    "RIGHT": "CURTAIN",
+    "UP": "LIGHT",
+    "DOWN": "TV"
   },
   "calibration": {
     "CENTER": { "x": 0.5, "y": 0.5 },
     "LEFT": { "x": 0.32, "y": 0.5 },
-    "RIGHT": { "x": 0.68, "y": 0.5 }
+    "RIGHT": { "x": 0.68, "y": 0.5 },
+    "UP": { "x": 0.5, "y": 0.32 },
+    "DOWN": { "x": 0.5, "y": 0.68 }
   }
 }

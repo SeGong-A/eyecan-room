@@ -16,7 +16,7 @@ class BlinkThresholds:
     short_min_ms: int = 100
     short_max_ms: int = 250
     select_min_ms: int = 500
-    cancel_min_ms: int = 1500
+    cancel_min_ms: int = 2000
 
 
 class BlinkStateMachine:

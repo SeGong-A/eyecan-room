@@ -7,6 +7,8 @@ const int panPin = 9;
 const int tiltPin = 10;
 const int fanPin = 5;
 const int lightPin = 6;
+const int curtainOpenPin = 7;
+const int curtainClosePin = 8;
 
 int panAngle = 90;
 int tiltAngle = 90;
@@ -24,6 +26,21 @@ void applyFanLevel(int value) {
 
 void applyLightLevel(int value) {
   analogWrite(lightPin, constrain(value, 0, 255));
+}
+
+void stopCurtain() {
+  digitalWrite(curtainOpenPin, LOW);
+  digitalWrite(curtainClosePin, LOW);
+}
+
+void openCurtain() {
+  digitalWrite(curtainOpenPin, HIGH);
+  digitalWrite(curtainClosePin, LOW);
+}
+
+void closeCurtain() {
+  digitalWrite(curtainOpenPin, LOW);
+  digitalWrite(curtainClosePin, HIGH);
 }
 
 void handleCommand(const String &command) {
@@ -55,6 +72,14 @@ void handleCommand(const String &command) {
     applyLightLevel(255);
   } else if (command == "LIGHT_DOWN") {
     applyLightLevel(80);
+  } else if (command == "CURTAIN_OPEN") {
+    openCurtain();
+  } else if (command == "CURTAIN_CLOSE") {
+    closeCurtain();
+  } else if (command == "CURTAIN_STOP") {
+    stopCurtain();
+  } else if (command == "TV_POWER" || command == "TV_CH_UP" || command == "TV_CH_DOWN" || command == "TV_VOL_UP" || command == "TV_VOL_DOWN") {
+    // TV commands are handled by the web mock for the MVP.
   }
 
   Serial.print("ACK:");
@@ -67,9 +92,12 @@ void setup() {
   tiltServo.attach(tiltPin);
   pinMode(fanPin, OUTPUT);
   pinMode(lightPin, OUTPUT);
+  pinMode(curtainOpenPin, OUTPUT);
+  pinMode(curtainClosePin, OUTPUT);
   applyCameraPosition(90, 90);
   applyFanLevel(0);
   applyLightLevel(0);
+  stopCurtain();
 }
 
 void loop() {
