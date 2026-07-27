@@ -12,6 +12,7 @@ Arduino or ESP32 firmware for the EyeCan Room demo hardware.
 - Receive window commands (motor pins will be assigned after hardware selection)
 
 Pin assignments and the reasoning behind them live in [PINS.md](./PINS.md).
+Per-device wiring instructions live in [WIRING.md](./WIRING.md).
 
 ## Command examples
 
