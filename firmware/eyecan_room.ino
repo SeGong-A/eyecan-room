@@ -1,14 +1,16 @@
 #include <Servo.h>
 
+// Pin assignments for Arduino Uno — see PINS.md for the full table and rationale.
+// D0/D1 are reserved for Serial (command in / ACK out) and must never be reused here.
 Servo panServo;
 Servo tiltServo;
 
-const int panPin = 9;
-const int tiltPin = 10;
-const int fanPin = 5;
-const int lightPin = 6;
-const int curtainOpenPin = 7;
-const int curtainClosePin = 8;
+const int panPin = 9;           // Servo (Timer1)
+const int tiltPin = 10;         // Servo (Timer1)
+const int fanPin = 5;           // PWM analogWrite (Timer0)
+const int lightPin = 6;         // PWM analogWrite (Timer0)
+const int curtainOpenPin = 7;   // Digital out — motor driver direction
+const int curtainClosePin = 8;  // Digital out — motor driver direction
 
 int panAngle = 90;
 int tiltAngle = 90;
