@@ -16,31 +16,27 @@ class GazeSample:
     face_detected: bool
 
 
-LEFT_EYE_LEFT, LEFT_EYE_RIGHT = 33, 133
-LEFT_EYE_TOP, LEFT_EYE_BOTTOM = 159, 145
-
-RIGHT_EYE_LEFT, RIGHT_EYE_RIGHT = 362, 263
-RIGHT_EYE_TOP, RIGHT_EYE_BOTTOM = 386, 374
+@dataclass(frozen=True)
+class GazeModelPaths:
+    task_path: str
+    model_path: str
 
 
 def _clip(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def _calculate_ear(landmarks: list[object]) -> float:
-    l_eye_w = max(1e-6, landmarks[LEFT_EYE_RIGHT].x - landmarks[LEFT_EYE_LEFT].x)
-    r_eye_w = max(1e-6, landmarks[RIGHT_EYE_RIGHT].x - landmarks[RIGHT_EYE_LEFT].x)
+def resolve_gaze_model_paths() -> GazeModelPaths:
+    base_dir = os.path.dirname(__file__)
+    repo_root = os.path.abspath(os.path.join(base_dir, "..", "..", ".."))
+    gaze_rl_dir = os.path.join(repo_root, "Gaze_control_RL")
+    task_path = os.path.join(gaze_rl_dir, "face_landmarker.task")
+    model_path = os.path.join(gaze_rl_dir, "residual_gaze_model_v3.zip")
+    personalized_model_path = os.path.join(gaze_rl_dir, "residual_gaze_model_v3_personalized.zip")
+    if os.path.exists(personalized_model_path):
+        model_path = personalized_model_path
 
-    l_h1 = abs(landmarks[159].y - landmarks[145].y)
-    l_h2 = abs(landmarks[160].y - landmarks[144].y)
-    l_h3 = abs(landmarks[158].y - landmarks[153].y)
-    r_h1 = abs(landmarks[386].y - landmarks[374].y)
-    r_h2 = abs(landmarks[385].y - landmarks[380].y)
-    r_h3 = abs(landmarks[387].y - landmarks[373].y)
-
-    ear_left = ((l_h1 + l_h2 + l_h3) / 3.0) / l_eye_w
-    ear_right = ((r_h1 + r_h2 + r_h3) / 3.0) / r_eye_w
-    return float((ear_left + ear_right) / 2.0)
+    return GazeModelPaths(task_path=task_path, model_path=model_path)
 
 
 class AdaptiveGazeController:
@@ -222,24 +218,15 @@ class VisionGazeTracker:
             self._set_error(f"Adaptive gaze dependencies import failed: {exc}")
             return
 
-        base_dir = os.path.dirname(__file__)
-        repo_root = os.path.abspath(os.path.join(base_dir, "..", "..", ".."))
-        gaze_rl_dir = os.path.join(repo_root, "Gaze_control_RL")
-        task_path = os.path.join(gaze_rl_dir, "face_landmarker.task")
-        if not os.path.exists(task_path):
-            task_path = os.path.join(base_dir, "face_landmarker.task")
-        model_path = os.path.join(gaze_rl_dir, "residual_gaze_model_v3.zip")
-        personalized_model_path = os.path.join(gaze_rl_dir, "residual_gaze_model_v3_personalized.zip")
-        if os.path.exists(personalized_model_path):
-            model_path = personalized_model_path
-        if not os.path.exists(task_path):
-            self._set_error(f"Missing FaceLandmarker model: {task_path}")
+        model_paths = resolve_gaze_model_paths()
+        if not os.path.exists(model_paths.task_path):
+            self._set_error(f"Missing FaceLandmarker model: {model_paths.task_path}")
             return
 
         landmarker = None
         cap = None
         try:
-            base_options = python.BaseOptions(model_asset_path=task_path)
+            base_options = python.BaseOptions(model_asset_path=model_paths.task_path)
             options = vision.FaceLandmarkerOptions(
                 base_options=base_options,
                 running_mode=vision.RunningMode.IMAGE,
@@ -249,7 +236,7 @@ class VisionGazeTracker:
                 min_tracking_confidence=0.5,
             )
             landmarker = vision.FaceLandmarker.create_from_options(options)
-            controller = AdaptiveGazeController(model_path=model_path)
+            controller = AdaptiveGazeController(model_path=model_paths.model_path)
 
             cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():

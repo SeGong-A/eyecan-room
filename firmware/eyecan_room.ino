@@ -45,49 +45,123 @@ void closeCurtain() {
   digitalWrite(curtainClosePin, HIGH);
 }
 
-void handleCommand(const String &command) {
-  if (command == "CAM_LEFT") {
-    applyCameraPosition(40, tiltAngle);
-  } else if (command == "CAM_RIGHT") {
-    applyCameraPosition(140, tiltAngle);
-  } else if (command == "CAM_UP") {
-    applyCameraPosition(panAngle, 60);
-  } else if (command == "CAM_DOWN") {
-    applyCameraPosition(panAngle, 120);
-  } else if (command == "CAM_STOP") {
-    applyCameraPosition(90, 90);
-  } else if (command == "FAN_ON") {
-    applyFanLevel(180);
-  } else if (command == "FAN_OFF") {
-    applyFanLevel(0);
-  } else if (command == "FAN_LOW") {
-    applyFanLevel(80);
-  } else if (command == "FAN_MID") {
-    applyFanLevel(160);
-  } else if (command == "FAN_HIGH") {
-    applyFanLevel(255);
-  } else if (command == "LIGHT_ON") {
-    applyLightLevel(255);
-  } else if (command == "LIGHT_OFF") {
-    applyLightLevel(0);
-  } else if (command == "LIGHT_UP") {
-    applyLightLevel(255);
-  } else if (command == "LIGHT_DOWN") {
-    applyLightLevel(80);
-  } else if (command == "CURTAIN_OPEN") {
-    openCurtain();
-  } else if (command == "CURTAIN_CLOSE") {
-    closeCurtain();
-  } else if (command == "CURTAIN_STOP") {
-    stopCurtain();
-  } else if (command == "WINDOW_OPEN" || command == "WINDOW_CLOSE" || command == "WINDOW_STOP") {
-    // Window motor pins and driver will be assigned after hardware selection.
-  } else if (command == "TV_POWER" || command == "TV_CH_UP" || command == "TV_CH_DOWN" || command == "TV_VOL_UP" || command == "TV_VOL_DOWN") {
-    // TV commands are handled by the web mock for the MVP.
-  }
+String readSerialCommand() {
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  return command;
+}
 
+void sendAck(const String &command) {
   Serial.print("ACK:");
   Serial.println(command);
+}
+
+bool handleCameraCommand(const String &command) {
+  if (command == "CAM_LEFT") {
+    applyCameraPosition(40, tiltAngle);
+    return true;
+  }
+  if (command == "CAM_RIGHT") {
+    applyCameraPosition(140, tiltAngle);
+    return true;
+  }
+  if (command == "CAM_UP") {
+    applyCameraPosition(panAngle, 60);
+    return true;
+  }
+  if (command == "CAM_DOWN") {
+    applyCameraPosition(panAngle, 120);
+    return true;
+  }
+  if (command == "CAM_STOP") {
+    applyCameraPosition(90, 90);
+    return true;
+  }
+  return false;
+}
+
+bool handleFanCommand(const String &command) {
+  if (command == "FAN_ON") {
+    applyFanLevel(180);
+    return true;
+  }
+  if (command == "FAN_OFF") {
+    applyFanLevel(0);
+    return true;
+  }
+  if (command == "FAN_LOW") {
+    applyFanLevel(80);
+    return true;
+  }
+  if (command == "FAN_MID") {
+    applyFanLevel(160);
+    return true;
+  }
+  if (command == "FAN_HIGH") {
+    applyFanLevel(255);
+    return true;
+  }
+  return false;
+}
+
+bool handleLightCommand(const String &command) {
+  if (command == "LIGHT_ON") {
+    applyLightLevel(255);
+    return true;
+  }
+  if (command == "LIGHT_OFF") {
+    applyLightLevel(0);
+    return true;
+  }
+  if (command == "LIGHT_UP") {
+    applyLightLevel(255);
+    return true;
+  }
+  if (command == "LIGHT_DOWN") {
+    applyLightLevel(80);
+    return true;
+  }
+  return false;
+}
+
+bool handleCurtainCommand(const String &command) {
+  if (command == "CURTAIN_OPEN") {
+    openCurtain();
+    return true;
+  }
+  if (command == "CURTAIN_CLOSE") {
+    closeCurtain();
+    return true;
+  }
+  if (command == "CURTAIN_STOP") {
+    stopCurtain();
+    return true;
+  }
+  return false;
+}
+
+bool handleWindowCommand(const String &command) {
+  return command == "WINDOW_OPEN" || command == "WINDOW_CLOSE" || command == "WINDOW_STOP";
+}
+
+bool handleTvCommand(const String &command) {
+  return command == "TV_POWER" || command == "TV_CH_UP" || command == "TV_CH_DOWN" || command == "TV_VOL_UP" || command == "TV_VOL_DOWN";
+}
+
+void handleCommand(const String &command) {
+  if (
+    handleCameraCommand(command) ||
+    handleFanCommand(command) ||
+    handleLightCommand(command) ||
+    handleCurtainCommand(command) ||
+    handleWindowCommand(command) ||
+    handleTvCommand(command)
+  ) {
+    sendAck(command);
+    return;
+  }
+
+  sendAck(command);
 }
 
 void setup() {
@@ -109,8 +183,7 @@ void loop() {
     return;
   }
 
-  String command = Serial.readStringUntil('\n');
-  command.trim();
+  String command = readSerialCommand();
 
   if (command.length() == 0) {
     return;
