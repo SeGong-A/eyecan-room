@@ -203,11 +203,15 @@ node_modules/
 dist/
 coverage/
 .vite/
+.pnpm-store/
+/package-lock.json
 apps/web/node_modules/
 apps/web/dist/
 apps/web/.vite/
 apps/api/.venv/
 apps/api/__pycache__/
+apps/api/app/adaptive_calibration_model.zip
+apps/api/app/face_landmarker.task
 *.tsbuildinfo
 #   you could uncomment the following to ignore the entire vscode folder
 # .vscode/
