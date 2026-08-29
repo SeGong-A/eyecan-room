@@ -31,7 +31,7 @@ const int EXTRA_SERVO_PIN = 5;
 const int CAM_PAN_PIN = 8;
 const int CAM_TILT_PIN = 9;
 
-const int STEP_SIZE = 10;
+const int STEP_SIZE = 45;
 const int HOME_ANGLE = 90;
 
 Servo extraServo;
@@ -43,6 +43,11 @@ int fanLevel = 0;
 int extraAngle = HOME_ANGLE;
 int panAngle = HOME_ANGLE;
 int tiltAngle = HOME_ANGLE;
+
+bool camUsedW = false;
+bool camUsedA = false;
+bool camUsedS = false;
+bool camUsedD = false;
 
 enum Mode { MODE_MENU, MODE_CAMERA, MODE_SERVO, MODE_LIGHT, MODE_FAN };
 Mode currentMode = MODE_MENU;
@@ -160,20 +165,44 @@ void applyCamera(String rawInput) {
 
   switch (c) {
     case 'w':
+      if (camUsedW) {
+        Serial.println("이미 위로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return;
+      }
+      camUsedW = true;
       tiltAngle = constrain(tiltAngle + STEP_SIZE, 0, 180);
       break;
     case 's':
+      if (camUsedS) {
+        Serial.println("이미 아래로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return;
+      }
+      camUsedS = true;
       tiltAngle = constrain(tiltAngle - STEP_SIZE, 0, 180);
       break;
     case 'a':
+      if (camUsedA) {
+        Serial.println("이미 왼쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return;
+      }
+      camUsedA = true;
       panAngle = constrain(panAngle - STEP_SIZE, 0, 180);
       break;
     case 'd':
+      if (camUsedD) {
+        Serial.println("이미 오른쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return;
+      }
+      camUsedD = true;
       panAngle = constrain(panAngle + STEP_SIZE, 0, 180);
       break;
     case 'c':
       panAngle = HOME_ANGLE;
       tiltAngle = HOME_ANGLE;
+      camUsedW = false;
+      camUsedA = false;
+      camUsedS = false;
+      camUsedD = false;
       panServo.write(panAngle);
       tiltServo.write(tiltAngle);
       Serial.println("[중앙 복귀] Pan/Tilt | 계속 입력하거나 'm'으로 메뉴 복귀");
