@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getInitialArduinoStatus, type ArduinoStatus } from '../lib/arduinoSerial';
 
 export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT';
 export type FullGazeDirection = GazeDirection | 'UP' | 'DOWN';
@@ -33,6 +34,9 @@ type AppState = {
   visionError: string | null;
   faceDetected: boolean;
   eyeAspectRatio: number;
+  arduinoStatus: ArduinoStatus;
+  arduinoError: string | null;
+  lastArduinoCommand: string;
   setGazeDirection: (direction: FullGazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setInteractionMode: (mode: InteractionMode) => void;
@@ -43,6 +47,9 @@ type AppState = {
   setSettingsMenu: (value: SettingsMenu) => void;
   setScanStep: (value: number | ((current: number) => number)) => void;
   setConnectionState: (value: AppState['connectionState']) => void;
+  setArduinoStatus: (value: ArduinoStatus) => void;
+  setArduinoError: (value: string | null) => void;
+  setLastArduinoCommand: (value: string) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: FullGazeDirection;
     selected_target: ScanTarget;
@@ -83,6 +90,9 @@ export const useAppStore = create<AppState>((set) => ({
   visionError: null,
   faceDetected: false,
   eyeAspectRatio: 0,
+  arduinoStatus: getInitialArduinoStatus(),
+  arduinoError: null,
+  lastArduinoCommand: 'NONE',
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setInteractionMode: (interactionMode) => set({ interactionMode, scanStep: 0 }),
@@ -102,6 +112,9 @@ export const useAppStore = create<AppState>((set) => ({
       scanStep: typeof scanStep === 'function' ? scanStep(state.scanStep) : scanStep
     })),
   setConnectionState: (connectionState) => set({ connectionState }),
+  setArduinoStatus: (arduinoStatus) => set({ arduinoStatus }),
+  setArduinoError: (arduinoError) => set({ arduinoError }),
+  setLastArduinoCommand: (lastArduinoCommand) => set({ lastArduinoCommand }),
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;
