@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useCamera, type CameraStatus } from './hooks/useCamera';
 import {
+  commandToArduinoSequence,
+  connectArduino,
+  disconnectArduino,
+  isArduinoConnected,
+  isArduinoSerialSupported,
+  writeArduinoCommand
+} from './lib/arduinoSerial';
+import {
   useAppStore,
   type FullGazeDirection,
   type ScanTarget
@@ -129,6 +137,14 @@ function visionMessage(status: string) {
   if (status === 'RUNNING') return '시선 추적 중입니다';
   if (status === 'ERROR') return '시선 추적 엔진에서 오류가 발생했습니다';
   return '아직 시선 추적을 시작하지 않았습니다';
+}
+
+function arduinoStatusText(status: string) {
+  if (status === 'UNSUPPORTED') return 'Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다';
+  if (status === 'CONNECTING') return 'Arduino 연결 중';
+  if (status === 'CONNECTED') return 'Arduino 연결됨';
+  if (status === 'ERROR') return 'Arduino 연결 오류';
+  return 'Arduino 미연결';
 }
 
 function App() {
@@ -317,9 +333,13 @@ function App() {
       await chooseSharedTarget(selectedTarget);
       return;
     }
+    const arduinoResult = await sendArduinoCommand(item.command);
     await postCommand(item.command, targetMeta[store.selectedTarget].name, item.label);
     updateTvMock(item.command);
-    await returnToExplore(item.description);
+    const arduinoMessage = arduinoResult.ok
+      ? ''
+      : ` · ${arduinoResult.error ?? 'Arduino가 연결되지 않았습니다'}`;
+    await returnToExplore(`${item.description}${arduinoMessage}`);
   }
 
   async function selectSettingsItem(item: CommandItem) {
@@ -395,6 +415,57 @@ function App() {
       },
       ...items
     ].slice(0, 6));
+  }
+  async function sendArduinoCommand(command: string) {
+    if (!commandToArduinoSequence(command)) {
+      store.setLastArduinoCommand(`SKIP:${command}`);
+      return { ok: true, skipped: true, command };
+    }
+
+    if (!isArduinoSerialSupported()) {
+      store.setArduinoStatus('UNSUPPORTED');
+      store.setArduinoError('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
+      return { ok: false, error: 'Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다' };
+    }
+
+    const result = await writeArduinoCommand(command);
+    store.setLastArduinoCommand(result.skipped ? `SKIP:${command}` : command);
+    if (result.ok) {
+      store.setArduinoError(null);
+      if (isArduinoConnected()) store.setArduinoStatus('CONNECTED');
+      return result;
+    }
+
+    store.setArduinoStatus(isArduinoConnected() ? 'ERROR' : 'DISCONNECTED');
+    store.setArduinoError(result.error ?? 'Arduino 전송 중 오류가 발생했습니다');
+    return result;
+  }
+  async function connectArduinoFromUi() {
+    if (!isArduinoSerialSupported()) {
+      store.setArduinoStatus('UNSUPPORTED');
+      store.setArduinoError('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
+      setToast('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
+      return;
+    }
+
+    try {
+      store.setArduinoStatus('CONNECTING');
+      store.setArduinoError(null);
+      await connectArduino();
+      store.setArduinoStatus('CONNECTED');
+      setToast('Arduino가 연결되었습니다');
+    } catch (error) {
+      store.setArduinoStatus('ERROR');
+      const message = error instanceof Error ? error.message : 'Arduino 연결에 실패했습니다';
+      store.setArduinoError(message);
+      setToast(message);
+    }
+  }
+  async function disconnectArduinoFromUi() {
+    await disconnectArduino();
+    store.setArduinoStatus(isArduinoSerialSupported() ? 'DISCONNECTED' : 'UNSUPPORTED');
+    store.setArduinoError(null);
+    setToast('Arduino 연결을 해제했습니다');
   }
   async function postGazeSample(direction: FullGazeDirection) {
     const sample = gazeSamples[direction];
@@ -665,6 +736,19 @@ function App() {
             <strong>EyeCan Room</strong>
           </div>
           <button className="room-settings-button" type="button" aria-label="설정" onClick={openSettingsRotation}>⚙</button>
+          <div className={`arduino-panel arduino-${store.arduinoStatus.toLowerCase()}`}>
+            <div>
+              <strong>{arduinoStatusText(store.arduinoStatus)}</strong>
+              <small>{store.arduinoError ?? `마지막 전송: ${store.lastArduinoCommand}`}</small>
+            </div>
+            <button
+              type="button"
+              disabled={store.arduinoStatus === 'UNSUPPORTED' || store.arduinoStatus === 'CONNECTING'}
+              onClick={() => void (store.arduinoStatus === 'CONNECTED' ? disconnectArduinoFromUi() : connectArduinoFromUi())}
+            >
+              {store.arduinoStatus === 'CONNECTED' ? '해제' : 'Arduino 연결'}
+            </button>
+          </div>
 
           <div className={`gaze-pill gaze-${visibleGazeDirection.toLowerCase()}`}>
             <span>●</span> 시선 · {directionLabel[visibleGazeDirection]}
