@@ -1,4 +1,6 @@
-export type ArduinoStatus = 'UNSUPPORTED' | 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
+import type { ArduinoStatus } from '../types/control';
+
+export type { ArduinoStatus } from '../types/control';
 
 type SerialPortLike = {
   open: (options: { baudRate: number }) => Promise<void>;
@@ -39,10 +41,6 @@ function serial(): NavigatorWithSerial['serial'] {
 
 export function isArduinoSerialSupported() {
   return Boolean(serial());
-}
-
-export function getInitialArduinoStatus(): ArduinoStatus {
-  return isArduinoSerialSupported() ? 'DISCONNECTED' : 'UNSUPPORTED';
 }
 
 export async function connectArduino() {

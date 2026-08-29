@@ -1,12 +1,22 @@
 import { create } from 'zustand';
-import { getInitialArduinoStatus, type ArduinoStatus } from '../lib/arduinoSerial';
+import type {
+  ArduinoStatus,
+  FullGazeDirection,
+  InteractionMode,
+  ScanTarget,
+  SettingsMenu,
+  ThemeMode
+} from '../types/control';
 
-export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT';
-export type FullGazeDirection = GazeDirection | 'UP' | 'DOWN';
-export type ScanTarget = 'FAN' | 'LIGHT' | 'TV' | 'CURTAIN' | 'WINDOW';
-export type InteractionMode = 'EXPLORE' | 'TARGET_CHOICE' | 'COMMAND' | 'SETTINGS' | 'SETTINGS_SUBMENU';
-export type ThemeMode = 'light' | 'dark';
-export type SettingsMenu = 'ROOT' | 'SCAN_SPEED' | 'THEME';
+export type {
+  ArduinoStatus,
+  FullGazeDirection,
+  GazeDirection,
+  InteractionMode,
+  ScanTarget,
+  SettingsMenu,
+  ThemeMode
+} from '../types/control';
 
 const storedScanInterval = Number(window.localStorage.getItem('eyecan.scanIntervalMs'));
 const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanInterval >= 1000 && storedScanInterval <= 5000
@@ -15,7 +25,7 @@ const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanI
 const storedThemeMode = window.localStorage.getItem('eyecan.themeMode');
 const initialThemeMode: ThemeMode = storedThemeMode === 'dark' ? 'dark' : 'light';
 
-type AppState = {
+export type AppState = {
   gazeDirection: FullGazeDirection;
   selectedTarget: ScanTarget;
   interactionMode: InteractionMode;
@@ -90,7 +100,7 @@ export const useAppStore = create<AppState>((set) => ({
   visionError: null,
   faceDetected: false,
   eyeAspectRatio: 0,
-  arduinoStatus: getInitialArduinoStatus(),
+  arduinoStatus: 'DISCONNECTED',
   arduinoError: null,
   lastArduinoCommand: 'NONE',
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),

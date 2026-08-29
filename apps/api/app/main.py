@@ -50,6 +50,38 @@ active_websockets: set[WebSocket] = set()
 main_loop: asyncio.AbstractEventLoop | None = None
 
 
+def state_payload() -> dict[str, object]:
+    return asdict(state)
+
+
+def reset_scan_position() -> None:
+    state.scan_step = 0
+
+
+def update_gaze_point(x: float, y: float) -> str:
+    point = GazePoint(x=x, y=y)
+    direction = gaze_classifier.classify(point)
+    state.gaze_direction = direction.value
+    state.last_gaze_point_x = x
+    state.last_gaze_point_y = y
+    return direction.value
+
+
+def apply_blink_event(event: BlinkEventType) -> None:
+    state.last_blink_event = event.value
+    if event.value != BlinkEventType.NONE.value:
+        state.blink_sequence += 1
+    if event == BlinkEventType.CANCEL:
+        state.is_paused = not state.is_paused
+        state.interaction_mode = "EXPLORE"
+        reset_scan_position()
+
+
+def schedule_broadcast_state() -> None:
+    if main_loop and main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast_state(), main_loop)
+
+
 @app.on_event("startup")
 async def remember_main_loop() -> None:
     global main_loop
@@ -57,7 +89,7 @@ async def remember_main_loop() -> None:
 
 
 async def broadcast_state() -> None:
-    payload = asdict(state)
+    payload = state_payload()
     stale_websockets: set[WebSocket] = set()
 
     for websocket in active_websockets:
@@ -77,71 +109,61 @@ def health() -> dict[str, str]:
 
 @app.get("/state")
 def get_state() -> dict[str, object]:
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/state/ready")
 async def mark_ready() -> dict[str, object]:
     state.connection_state = "READY"
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/state/calibration")
 async def update_calibration(is_calibrated: bool) -> dict[str, object]:
     state.is_calibrated = is_calibrated
-    state.scan_step = 0
+    reset_scan_position()
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/state/target")
 async def update_target(target: str) -> dict[str, object]:
     state.selected_target = target
     state.interaction_mode = "EXPLORE"
-    state.scan_step = 0
+    reset_scan_position()
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/state/mode")
 async def update_mode(mode: str) -> dict[str, object]:
     state.interaction_mode = mode
-    state.scan_step = 0
+    reset_scan_position()
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/state/scan-speed")
 async def update_scan_speed(scan_interval_ms: int) -> dict[str, object]:
     state.scan_interval_ms = max(1000, min(scan_interval_ms, 5000))
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/events/blink")
 async def receive_blink_event(is_closed: bool, now_ms: int) -> dict[str, object]:
     event = blink_machine.update(is_closed=is_closed, now_ms=now_ms)
-    state.last_blink_event = event.value
-    if event.value != BlinkEventType.NONE.value:
-        state.blink_sequence += 1
-    if event == BlinkEventType.CANCEL:
-        state.is_paused = not state.is_paused
-        state.interaction_mode = "EXPLORE"
-        state.scan_step = 0
+    apply_blink_event(event)
     await broadcast_state()
-    return {"event": event.value, "state": asdict(state)}
+    return {"event": event.value, "state": state_payload()}
 
 
 @app.post("/events/gaze")
 async def receive_gaze_event(x: float, y: float) -> dict[str, object]:
-    point = GazePoint(x=x, y=y)
-    direction = gaze_classifier.classify(point)
-    state.gaze_direction = direction.value
-    state.last_gaze_point_x = x
-    state.last_gaze_point_y = y
+    direction = update_gaze_point(x=x, y=y)
     await broadcast_state()
-    return {"direction": direction.value, "state": asdict(state)}
+    return {"direction": direction, "state": state_payload()}
 
 
 def receive_vision_sample(sample: GazeSample) -> None:
@@ -154,23 +176,12 @@ def receive_vision_sample(sample: GazeSample) -> None:
         is_closed=sample.face_detected and sample.ear < 0.2,
         now_ms=int(time.time() * 1000),
     )
-    state.last_blink_event = blink_event.value
-    if blink_event.value != BlinkEventType.NONE.value:
-        state.blink_sequence += 1
-    if blink_event == BlinkEventType.CANCEL:
-        state.is_paused = not state.is_paused
-        state.interaction_mode = "EXPLORE"
-        state.scan_step = 0
+    apply_blink_event(blink_event)
 
     if sample.face_detected:
-        point = GazePoint(x=sample.x, y=sample.y)
-        direction = gaze_classifier.classify(point)
-        state.gaze_direction = direction.value
-        state.last_gaze_point_x = sample.x
-        state.last_gaze_point_y = sample.y
+        update_gaze_point(x=sample.x, y=sample.y)
 
-    if main_loop and main_loop.is_running():
-        asyncio.run_coroutine_threadsafe(broadcast_state(), main_loop)
+    schedule_broadcast_state()
 
 
 @app.post("/vision/start")
@@ -179,7 +190,7 @@ async def start_vision(camera_index: int = 0) -> dict[str, object]:
     state.vision_status = vision_tracker.status
     state.vision_error = vision_tracker.error
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/vision/stop")
@@ -187,14 +198,14 @@ async def stop_vision() -> dict[str, object]:
     vision_tracker.stop()
     state.vision_status = vision_tracker.status
     await broadcast_state()
-    return asdict(state)
+    return state_payload()
 
 
 @app.post("/events/command")
 async def receive_command(command: str) -> dict[str, object]:
     state.last_command = command
     await broadcast_state()
-    return {"command": command, "state": asdict(state)}
+    return {"command": command, "state": state_payload()}
 
 
 @app.websocket("/ws/state")
@@ -202,7 +213,7 @@ async def ws_state(websocket: WebSocket) -> None:
     await websocket.accept()
     state.connection_state = "STREAMING"
     active_websockets.add(websocket)
-    await websocket.send_json(asdict(state))
+    await websocket.send_json(state_payload())
 
     try:
         while True:

@@ -86,18 +86,90 @@ bool checkReturnToMenu(String input) {
   return false;
 }
 
+bool isValidLevel(int level) {
+  return level >= 0 && level <= 10;
+}
+
+int levelToLightPwm(int level) {
+  return map(level, 0, 10, 0, 255);
+}
+
+int levelToFanPwm(int level) {
+  return (level == 0) ? 0 : map(level, 1, 10, 255, 40);
+}
+
+void applyPwmLevel(int pin, int pwmValue) {
+  analogWrite(pin, pwmValue);
+}
+
+void writeExtraServo() {
+  extraServo.write(extraAngle);
+}
+
+void resetCameraDirectionLocks() {
+  camUsedW = false;
+  camUsedA = false;
+  camUsedS = false;
+  camUsedD = false;
+}
+
+void writeCameraServos() {
+  panServo.write(panAngle);
+  tiltServo.write(tiltAngle);
+}
+
+bool moveCameraOnce(char direction) {
+  switch (direction) {
+    case 'w':
+      if (camUsedW) {
+        Serial.println("이미 위로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return false;
+      }
+      camUsedW = true;
+      tiltAngle = constrain(tiltAngle + STEP_SIZE, 0, 180);
+      return true;
+    case 's':
+      if (camUsedS) {
+        Serial.println("이미 아래로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return false;
+      }
+      camUsedS = true;
+      tiltAngle = constrain(tiltAngle - STEP_SIZE, 0, 180);
+      return true;
+    case 'a':
+      if (camUsedA) {
+        Serial.println("이미 왼쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return false;
+      }
+      camUsedA = true;
+      panAngle = constrain(panAngle - STEP_SIZE, 0, 180);
+      return true;
+    case 'd':
+      if (camUsedD) {
+        Serial.println("이미 오른쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
+        return false;
+      }
+      camUsedD = true;
+      panAngle = constrain(panAngle + STEP_SIZE, 0, 180);
+      return true;
+    default:
+      Serial.println("w(위)/a(왼쪽)/s(아래)/d(오른쪽)/c(중앙복귀)/m(메뉴복귀) 중 입력하세요.");
+      return false;
+  }
+}
+
 void applyLight(String rawInput) {
   if (checkReturnToMenu(rawInput)) return;
 
   int level = rawInput.toInt();
-  if (level < 0 || level > 10) {
+  if (!isValidLevel(level)) {
     Serial.println("잘못된 입력입니다. 0~10 숫자를 입력하거나, 'm'으로 메뉴 복귀하세요.");
     return;
   }
 
   lightLevel = level;
-  int pwmValue = map(level, 0, 10, 0, 255);
-  analogWrite(LIGHT_PIN, pwmValue);
+  int pwmValue = levelToLightPwm(level);
+  applyPwmLevel(LIGHT_PIN, pwmValue);
 
   Serial.print("조명 밝기 변경 -> Level ");
   Serial.print(level);
@@ -110,14 +182,14 @@ void applyFan(String rawInput) {
   if (checkReturnToMenu(rawInput)) return;
 
   int level = rawInput.toInt();
-  if (level < 0 || level > 10) {
+  if (!isValidLevel(level)) {
     Serial.println("잘못된 입력입니다. 0~10 숫자를 입력하거나, 'm'으로 메뉴 복귀하세요.");
     return;
   }
 
   fanLevel = level;
-  int pwmValue = (level == 0) ? 0 : map(level, 1, 10, 255, 40);
-  analogWrite(FAN_PIN, pwmValue);
+  int pwmValue = levelToFanPwm(level);
+  applyPwmLevel(FAN_PIN, pwmValue);
 
   Serial.print("선풍기 속도 변경 -> Level ");
   Serial.print(level);
@@ -134,7 +206,7 @@ void applyExtraServo(String rawInput) {
 
   if (input.equalsIgnoreCase("c")) {
     extraAngle = HOME_ANGLE;
-    extraServo.write(extraAngle);
+    writeExtraServo();
     Serial.print("[중앙 복귀] 각도: ");
     Serial.print(extraAngle);
     Serial.println(" | 계속 입력하거나 'm'으로 메뉴 복귀");
@@ -148,7 +220,7 @@ void applyExtraServo(String rawInput) {
   }
 
   extraAngle = angle;
-  extraServo.write(extraAngle);
+  writeExtraServo();
   Serial.print("서보모터 이동 완료 -> 각도: ");
   Serial.print(extraAngle);
   Serial.println(" | 계속 입력하거나 'm'으로 메뉴 복귀");
@@ -163,57 +235,18 @@ void applyCamera(String rawInput) {
 
   char c = tolower(input.charAt(0));
 
-  switch (c) {
-    case 'w':
-      if (camUsedW) {
-        Serial.println("이미 위로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return;
-      }
-      camUsedW = true;
-      tiltAngle = constrain(tiltAngle + STEP_SIZE, 0, 180);
-      break;
-    case 's':
-      if (camUsedS) {
-        Serial.println("이미 아래로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return;
-      }
-      camUsedS = true;
-      tiltAngle = constrain(tiltAngle - STEP_SIZE, 0, 180);
-      break;
-    case 'a':
-      if (camUsedA) {
-        Serial.println("이미 왼쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return;
-      }
-      camUsedA = true;
-      panAngle = constrain(panAngle - STEP_SIZE, 0, 180);
-      break;
-    case 'd':
-      if (camUsedD) {
-        Serial.println("이미 오른쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return;
-      }
-      camUsedD = true;
-      panAngle = constrain(panAngle + STEP_SIZE, 0, 180);
-      break;
-    case 'c':
-      panAngle = HOME_ANGLE;
-      tiltAngle = HOME_ANGLE;
-      camUsedW = false;
-      camUsedA = false;
-      camUsedS = false;
-      camUsedD = false;
-      panServo.write(panAngle);
-      tiltServo.write(tiltAngle);
-      Serial.println("[중앙 복귀] Pan/Tilt | 계속 입력하거나 'm'으로 메뉴 복귀");
-      return;
-    default:
-      Serial.println("w(위)/a(왼쪽)/s(아래)/d(오른쪽)/c(중앙복귀)/m(메뉴복귀) 중 입력하세요.");
-      return;
+  if (c == 'c') {
+    panAngle = HOME_ANGLE;
+    tiltAngle = HOME_ANGLE;
+    resetCameraDirectionLocks();
+    writeCameraServos();
+    Serial.println("[중앙 복귀] Pan/Tilt | 계속 입력하거나 'm'으로 메뉴 복귀");
+    return;
   }
 
-  panServo.write(panAngle);
-  tiltServo.write(tiltAngle);
+  if (!moveCameraOnce(c)) return;
+
+  writeCameraServos();
 
   Serial.print("카메라 이동 -> Pan: ");
   Serial.print(panAngle);
