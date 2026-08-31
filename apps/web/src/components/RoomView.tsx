@@ -43,6 +43,14 @@ export function RoomView({
         <div>
           <strong>{arduinoStatusText(store.arduinoStatus)}</strong>
           <small>{store.arduinoError ?? `마지막 전송: ${store.lastArduinoCommand}`}</small>
+          {store.arduinoStatus === 'CONNECTED' && (
+            <small>
+              조명 {store.arduinoLevels.light} · 선풍기 {store.arduinoLevels.fan} · Pan {store.arduinoLevels.pan}° · Tilt {store.arduinoLevels.tilt}°
+            </small>
+          )}
+          {store.arduinoLog.length > 0 && (
+            <small>{store.arduinoLog[store.arduinoLog.length - 1]}</small>
+          )}
         </div>
         <button
           type="button"
