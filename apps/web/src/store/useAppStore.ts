@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  ArduinoLevels,
   ArduinoStatus,
   FullGazeDirection,
   InteractionMode,
@@ -9,6 +10,7 @@ import type {
 } from '../types/control';
 
 export type {
+  ArduinoLevels,
   ArduinoStatus,
   FullGazeDirection,
   GazeDirection,
@@ -17,6 +19,9 @@ export type {
   SettingsMenu,
   ThemeMode
 } from '../types/control';
+
+const MAX_ARDUINO_LOG_LINES = 8;
+const initialArduinoLevels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 90, servo: 90 };
 
 const storedScanInterval = Number(window.localStorage.getItem('eyecan.scanIntervalMs'));
 const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanInterval >= 1000 && storedScanInterval <= 5000
@@ -47,6 +52,8 @@ export type AppState = {
   arduinoStatus: ArduinoStatus;
   arduinoError: string | null;
   lastArduinoCommand: string;
+  arduinoLevels: ArduinoLevels;
+  arduinoLog: string[];
   setGazeDirection: (direction: FullGazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setInteractionMode: (mode: InteractionMode) => void;
@@ -60,6 +67,8 @@ export type AppState = {
   setArduinoStatus: (value: ArduinoStatus) => void;
   setArduinoError: (value: string | null) => void;
   setLastArduinoCommand: (value: string) => void;
+  setArduinoLevels: (value: Partial<ArduinoLevels>) => void;
+  pushArduinoLogLine: (line: string) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: FullGazeDirection;
     selected_target: ScanTarget;
@@ -103,6 +112,8 @@ export const useAppStore = create<AppState>((set) => ({
   arduinoStatus: 'DISCONNECTED',
   arduinoError: null,
   lastArduinoCommand: 'NONE',
+  arduinoLevels: initialArduinoLevels,
+  arduinoLog: [],
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setInteractionMode: (interactionMode) => set({ interactionMode, scanStep: 0 }),
@@ -125,6 +136,10 @@ export const useAppStore = create<AppState>((set) => ({
   setArduinoStatus: (arduinoStatus) => set({ arduinoStatus }),
   setArduinoError: (arduinoError) => set({ arduinoError }),
   setLastArduinoCommand: (lastArduinoCommand) => set({ lastArduinoCommand }),
+  setArduinoLevels: (value) =>
+    set((state) => ({ arduinoLevels: { ...state.arduinoLevels, ...value } })),
+  pushArduinoLogLine: (line) =>
+    set((state) => ({ arduinoLog: [...state.arduinoLog, line].slice(-MAX_ARDUINO_LOG_LINES) })),
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;

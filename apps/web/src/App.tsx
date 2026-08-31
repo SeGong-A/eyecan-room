@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppToast } from './components/AppToast';
-import { DemoControls } from './components/DemoControls';
 import { HomeScreen } from './components/HomeScreen';
 import { RadialControl } from './components/RadialControl';
 import { RoomView } from './components/RoomView';
@@ -19,11 +18,10 @@ import {
 } from './domain/control';
 import { useArduinoController } from './hooks/useArduinoController';
 import { useCamera } from './hooks/useCamera';
-import { useGazeDemoControls } from './hooks/useGazeDemoControls';
 import { useRotationScanner } from './hooks/useRotationScanner';
 import { useAppStore } from './store/useAppStore';
 import type { CommandItem, CommandLogItem, FullGazeDirection, ScanTarget, SetupStage } from './types/control';
-import { clamp, directionFromPoint } from './utils/gaze';
+import { clamp } from './utils/gaze';
 
 function App() {
   const store = useAppStore();
@@ -32,11 +30,8 @@ function App() {
   const [setupStage, setSetupStage] = useState<SetupStage>('HOME');
   const [calibrationIndex, setCalibrationIndex] = useState(0);
   const [showCalibration, setShowCalibration] = useState(false);
-  const [showSimulator, setShowSimulator] = useState(false);
   const [toast, setToast] = useState('');
-  const [tvState, setTvState] = useState({ power: false, channel: 7, volume: 18 });
   const [commandLog, setCommandLog] = useState<CommandLogItem[]>([]);
-  const [trackedGazePoint, setTrackedGazePoint] = useState({ x: 0.5, y: 0.5 });
   const scanList = useMemo(() => {
     if (store.interactionMode === 'SETTINGS') return settingsRootItems;
     if (store.interactionMode === 'SETTINGS_SUBMENU') {
@@ -52,17 +47,6 @@ function App() {
     scanList.length
   );
   const lastProcessedBlinkSequenceRef = useRef(0);
-  const trackedPointRef = useRef(trackedGazePoint);
-  const simulatedGazeDirectionRef = useRef<FullGazeDirection>('CENTER');
-  const { postGazeSample, simulateBlink } = useGazeDemoControls({
-    sendRequest,
-    setTrackedGazePoint,
-    simulatedGazeDirectionRef,
-    store,
-    trackedPointRef
-  });
-
-  useEffect(() => { trackedPointRef.current = trackedGazePoint; }, [trackedGazePoint]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = store.themeMode;
@@ -92,82 +76,6 @@ function App() {
   }, [store.setConnectionState, store.syncFromServer]);
 
   useEffect(() => {
-    if (showSimulator) return;
-    if (eyeCamera.status !== 'READY') return;
-
-    const video = eyeCamera.videoRef.current;
-    if (!video) return;
-
-    const canvas = document.createElement('canvas');
-    const width = 120;
-    const height = 90;
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return;
-
-    let frameId = 0;
-    let lastSampleAt = 0;
-
-    const sampleFrame = (now: number) => {
-      if (now - lastSampleAt >= 90 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        lastSampleAt = now;
-        context.drawImage(video, 0, 0, width, height);
-        const image = context.getImageData(0, 0, width, height).data;
-        let weightTotal = 0;
-        let weightedX = 0;
-        let weightedY = 0;
-
-        const cropLeft = 26;
-        const cropRight = 94;
-        const cropTop = 18;
-        const cropBottom = 56;
-
-        for (let y = cropTop; y < cropBottom; y += 1) {
-          for (let x = cropLeft; x < cropRight; x += 1) {
-            const index = (y * width + x) * 4;
-            const red = image[index];
-            const green = image[index + 1];
-            const blue = image[index + 2];
-            const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-            const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
-            if (luma < 72 && chroma < 70) {
-              const weight = 76 - luma;
-              weightTotal += weight;
-              weightedX += x * weight;
-              weightedY += y * weight;
-            }
-          }
-        }
-
-        if (weightTotal > 120) {
-          const rawX = weightedX / weightTotal;
-          const rawY = weightedY / weightTotal;
-          const normalizedX = clamp((rawX - cropLeft) / (cropRight - cropLeft), 0, 1);
-          const normalizedY = clamp((rawY - cropTop) / (cropBottom - cropTop), 0, 1);
-          const nextPoint = {
-            x: clamp(0.5 + (normalizedX - 0.5) * 1.35, 0.08, 0.92),
-            y: clamp(0.5 + (normalizedY - 0.5) * 1.55, 0.1, 0.9)
-          };
-          const current = trackedPointRef.current;
-          const smoothedPoint = {
-            x: current.x * 0.72 + nextPoint.x * 0.28,
-            y: current.y * 0.72 + nextPoint.y * 0.28
-          };
-          trackedPointRef.current = smoothedPoint;
-          setTrackedGazePoint(smoothedPoint);
-          store.setGazeDirection(directionFromPoint(smoothedPoint));
-        }
-      }
-
-      frameId = window.requestAnimationFrame(sampleFrame);
-    };
-
-    frameId = window.requestAnimationFrame(sampleFrame);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [eyeCamera.status, showSimulator, store.setGazeDirection]);
-
-  useEffect(() => {
     if (!store.blinkSequence || store.blinkSequence === lastProcessedBlinkSequenceRef.current) return;
     lastProcessedBlinkSequenceRef.current = store.blinkSequence;
     if (store.lastBlinkEvent === 'CANCEL') {
@@ -183,7 +91,7 @@ function App() {
     if (store.isPaused) return;
 
     if (store.interactionMode === 'EXPLORE') {
-      await openRotationUiForDirection(showSimulator ? simulatedGazeDirectionRef.current : store.gazeDirection);
+      await openRotationUiForDirection(store.gazeDirection);
       return;
     }
 
@@ -205,8 +113,9 @@ function App() {
     }
     const arduinoResult = await sendArduinoCommand(item.command);
     await postCommand(item.command, targetMeta[store.selectedTarget].name, item.label);
-    updateTvMock(item.command);
-    const arduinoMessage = arduinoResult.ok
+    const arduinoMessage = arduinoResult.rejected
+      ? ` · ${arduinoResult.error ?? '아두이노가 명령을 거부했습니다'}`
+      : arduinoResult.ok
       ? ''
       : ` · ${arduinoResult.error ?? 'Arduino가 연결되지 않았습니다'}`;
     await returnToExplore(`${item.description}${arduinoMessage}`);
@@ -268,7 +177,7 @@ function App() {
       return true;
     } catch {
       store.setConnectionState('DISCONNECTED');
-      setToast('API 연결 없이 프론트 데모 모드로 진행 중입니다');
+      setToast('API 서버에 연결되지 않았습니다');
       return false;
     }
   }
@@ -289,21 +198,13 @@ function App() {
   async function connectEyeCameraAndStartVision() {
     const didStartVision = await sendRequest('/vision/start?camera_index=0');
     if (didStartVision) {
-      setShowSimulator(false);
       setToast('실제 시선 추적을 시작했습니다');
       return;
     }
-
-    await eyeCamera.connect();
-    setShowSimulator(true);
-    setToast('백엔드 없이 프론트 간이 추적으로 진행합니다');
+    setToast('시선 추적 백엔드에 연결하지 못했습니다');
   }
   async function connectRoomCameraAndEnter() {
     await roomCamera.connect();
-  }
-  async function selectTarget(target: ScanTarget) {
-    store.setSelectedTarget(target);
-    await sendRequest(`/state/target?target=${target}`);
   }
   async function chooseSharedTarget(target: ScanTarget) {
     await sendRequest(`/state/target?target=${target}`);
@@ -312,7 +213,7 @@ function App() {
   async function openRotationUiForDirection(direction: FullGazeDirection) {
     const gazeTarget = targetByGazeDirection[direction];
     if (!gazeTarget) {
-      setToast('아래 방향은 선택 대상이 없습니다');
+      setToast('이 방향은 선택 대상이 없습니다');
       store.setInteractionMode('EXPLORE');
       return;
     }
@@ -324,29 +225,17 @@ function App() {
     store.setInteractionMode('COMMAND');
     setToast(`${targetMeta[gazeTarget].name} 로테이션 UI를 열었습니다`);
   }
-  async function simulateSelectBlink() {
-    if (store.interactionMode === 'EXPLORE') {
-      const direction = simulatedGazeDirectionRef.current;
-      await postGazeSample(direction);
-      await openRotationUiForDirection(direction);
-      return;
-    }
-
-    await selectCurrentScanItem();
-  }
   async function captureCalibrationStep() {
     const expectedDirection = calibrationSteps[calibrationIndex];
-    await postGazeSample(expectedDirection);
     if (calibrationIndex < calibrationSteps.length - 1) {
       setCalibrationIndex((index) => index + 1);
-      setToast(`${directionLabel[expectedDirection]} OK`);
+      setToast(`${directionLabel[expectedDirection]} 저장됨`);
     }
     else {
       store.setIsCalibrated(true);
       store.setIsPaused(false);
       store.setInteractionMode('EXPLORE');
       store.setScanStep(0);
-      setShowSimulator(true);
       await sendRequest('/state/calibration?is_calibrated=true');
       await sendRequest('/state/mode?mode=EXPLORE');
       setShowCalibration(false);
@@ -355,28 +244,10 @@ function App() {
       setToast('눈동자 인식을 완료했습니다');
     }
   }
-  async function startDemoMode() {
-    store.setIsCalibrated(true);
-    store.setIsPaused(false);
-    setShowSimulator(true);
-    setSetupStage('ROOM');
-    await sendRequest('/state/calibration?is_calibrated=true');
-    setToast('카메라 없이 프론트 데모를 시작합니다');
-  }
   function openSettingsRotation() {
     if (store.interactionMode !== 'EXPLORE') return;
     store.setSettingsMenu('ROOT');
     store.setInteractionMode('SETTINGS');
-  }
-  function updateTvMock(command: string) {
-    setTvState((current) => {
-      if (command === 'TV_POWER') return { ...current, power: !current.power };
-      if (command === 'TV_CH_UP') return { ...current, channel: current.channel + 1 };
-      if (command === 'TV_CH_DOWN') return { ...current, channel: Math.max(1, current.channel - 1) };
-      if (command === 'TV_VOL_UP') return { ...current, volume: Math.min(100, current.volume + 5) };
-      if (command === 'TV_VOL_DOWN') return { ...current, volume: Math.max(0, current.volume - 5) };
-      return current;
-    });
   }
 
   const rawScanStep = store.interactionMode === 'EXPLORE' ? store.scanStep : rotationStep;
@@ -395,12 +266,11 @@ function App() {
   const roomCameraReady = roomCamera.status === 'READY';
   const gazeTrackingReady = cameraReady || store.visionStatus === 'STARTING' || store.visionStatus === 'RUNNING';
   const canShowRoomControl = setupStage === 'ROOM';
-  const backendGazePoint = {
+  const activeGazePoint = {
     x: clamp(0.5 + (store.lastGazePoint.x - 0.5) * 2.4, 0.08, 0.92),
     y: clamp(0.5 + (store.lastGazePoint.y - 0.5) * 2.4, 0.1, 0.9)
   };
-  const activeGazePoint = showSimulator ? trackedGazePoint : store.visionStatus === 'RUNNING' ? backendGazePoint : trackedGazePoint;
-  const visibleGazeDirection = showSimulator ? directionFromPoint(activeGazePoint) : store.gazeDirection;
+  const visibleGazeDirection = store.gazeDirection;
   const gazeCursor = {
     x: `${activeGazePoint.x * 100}%`,
     y: `${activeGazePoint.y * 100}%`
@@ -429,8 +299,6 @@ function App() {
           onCaptureCalibrationStep={() => void captureCalibrationStep()}
           onConnectEyeCameraAndStartVision={() => void connectEyeCameraAndStartVision()}
           onConnectRoomCameraAndEnter={() => void connectRoomCameraAndEnter()}
-          onStartDemoMode={() => void startDemoMode()}
-          onToggleSimulator={() => setShowSimulator((value) => !value)}
         />
       )}
 
@@ -462,17 +330,9 @@ function App() {
         </RoomView>
       )}
 
-      {showSimulator && canShowRoomControl && (
-        <DemoControls
-          onGazeSample={(direction) => void postGazeSample(direction)}
-          onSelectBlink={() => void simulateSelectBlink()}
-          onPauseBlink={() => void simulateBlink(2100)}
-        />
-      )}
-
       {showCalibration && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="calibration-title"><section className="calibration-modal"><button className="modal-close" type="button" aria-label="닫기" onClick={() => setShowCalibration(false)}>×</button><span className="step-count">{calibrationIndex + 1} / {calibrationSteps.length}</span><div className={`calibration-target target-${calibrationSteps[calibrationIndex].toLowerCase()}`}><span /></div><h1 id="calibration-title">{calibrationCopy[calibrationSteps[calibrationIndex]]}</h1><p>얼굴은 움직이지 말고 눈동자만 움직여주세요.</p><div className="step-dots">{calibrationSteps.map((step, index) => <i className={index <= calibrationIndex ? 'active' : ''} key={step} />)}</div><button className="primary-button" type="button" onClick={() => void captureCalibrationStep()}>{calibrationIndex === calibrationSteps.length - 1 ? '시선 맞춤 완료' : '이 방향 저장'}</button></section></div>}
 
-      {store.isPaused && <div className="pause-screen"><span>Ⅱ</span><h1>잠시 쉬는 중이에요</h1><p>다시 2초 동안 눈을 감으면 시작합니다.</p><button type="button" onClick={() => void simulateBlink(2100)}>화면 눌러 다시 시작</button></div>}
+      {store.isPaused && <div className="pause-screen"><span>Ⅱ</span><h1>잠시 쉬는 중이에요</h1><p>다시 2초 동안 눈을 감으면 시작합니다.</p><button type="button" onClick={() => store.setIsPaused(false)}>화면 눌러 다시 시작</button></div>}
       <AppToast message={toast} />
       {store.interactionMode !== 'EXPLORE' && <div className="sr-only" aria-live="assertive">{currentItem.label} 항목이 선택 대기 중입니다.</div>}
     </main>

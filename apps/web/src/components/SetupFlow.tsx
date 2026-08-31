@@ -19,8 +19,6 @@ type SetupFlowProps = {
   onCaptureCalibrationStep: () => void;
   onConnectEyeCameraAndStartVision: () => void;
   onConnectRoomCameraAndEnter: () => void;
-  onStartDemoMode: () => void;
-  onToggleSimulator: () => void;
 };
 
 export function SetupFlow({
@@ -35,9 +33,7 @@ export function SetupFlow({
   store,
   onCaptureCalibrationStep,
   onConnectEyeCameraAndStartVision,
-  onConnectRoomCameraAndEnter,
-  onStartDemoMode,
-  onToggleSimulator
+  onConnectRoomCameraAndEnter
 }: SetupFlowProps) {
   return (
     <>
@@ -51,9 +47,6 @@ export function SetupFlow({
           {setupStage === 'EYE_CAMERA' && !isEyeCalibrationStep && '내장 카메라 연결 필요'}
           {isEyeCalibrationStep && '사용자 눈동자 인식 중'}
           {setupStage === 'ROOM_CAMERA' && '외장 카메라 연결 필요'}
-        </div>
-        <div className="header-actions">
-          <button className="text-button" type="button" onClick={onToggleSimulator}>테스트 도구</button>
         </div>
       </header>
 
@@ -89,7 +82,6 @@ export function SetupFlow({
                 <button className="primary-button" type="button" disabled={eyeCamera.status === 'REQUESTING'} onClick={onConnectEyeCameraAndStartVision}>
                   {eyeCamera.status === 'REQUESTING' ? '연결 중' : '시작하기'}
                 </button>
-                <button className="ghost-button" type="button" onClick={onStartDemoMode}>프론트 데모</button>
               </div>
             </div>
           )}
@@ -113,9 +105,9 @@ export function SetupFlow({
               </div>
               {store.visionError && <div className="camera-error compact" role="alert"><strong>시선 추적 오류</strong><p>{store.visionError}</p></div>}
               <div className="step-dots">{calibrationSteps.map((step, index) => <i className={index <= calibrationIndex ? 'active' : ''} key={step} />)}</div>
-              <p className="dev-skip-note">개발 확인용 · 실제 인식 없이 다음 단계로 진행</p>
+              <p className="dev-skip-note">이 방향을 바라본 상태에서 저장하세요</p>
               <button className="primary-button dev-ok-button" type="button" onClick={onCaptureCalibrationStep}>
-                {calibrationIndex === calibrationSteps.length - 1 ? 'OK - 시선 인식 완료' : `OK - ${directionLabel[expectedCalibrationDirection]} 통과`}
+                {calibrationIndex === calibrationSteps.length - 1 ? '시선 인식 완료' : `${directionLabel[expectedCalibrationDirection]} 저장`}
               </button>
             </div>
           )}

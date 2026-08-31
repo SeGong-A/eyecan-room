@@ -5,7 +5,8 @@ export const targetMeta: Record<ScanTarget, TargetMeta> = {
   LIGHT: { name: '조명', icon: '☀' },
   TV: { name: 'TV', icon: '▣' },
   CURTAIN: { name: '커튼', icon: '▥' },
-  WINDOW: { name: '창문', icon: '▦' }
+  WINDOW: { name: '창문', icon: '▦' },
+  CAMERA: { name: '카메라', icon: '⊹' }
 };
 
 export const targetChoiceItems: CommandItem[] = [
@@ -66,15 +67,15 @@ export const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '닫기', description: '창문을 닫습니다', command: 'WINDOW_CLOSE' },
     { label: '멈춤', description: '창문을 멈춥니다', command: 'WINDOW_STOP' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
+  ],
+  CAMERA: [
+    { label: '왼쪽', description: '카메라를 왼쪽으로 돌립니다', command: 'CAM_LEFT' },
+    { label: '오른쪽', description: '카메라를 오른쪽으로 돌립니다', command: 'CAM_RIGHT' },
+    { label: '위', description: '카메라를 위로 올립니다', command: 'CAM_UP' },
+    { label: '아래', description: '카메라를 아래로 내립니다', command: 'CAM_DOWN' },
+    { label: '가운데', description: '카메라를 가운데로 정렬합니다', command: 'CAM_STOP' },
+    { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ]
-};
-
-export const gazeSamples: Record<FullGazeDirection, { x: number; y: number }> = {
-  LEFT: { x: 0.28, y: 0.5 },
-  RIGHT: { x: 0.72, y: 0.5 },
-  UP: { x: 0.5, y: 0.28 },
-  DOWN: { x: 0.5, y: 0.72 },
-  CENTER: { x: 0.5, y: 0.5 }
 };
 
 export const calibrationSteps: FullGazeDirection[] = ['CENTER', 'LEFT', 'RIGHT', 'UP', 'DOWN'];
@@ -99,12 +100,14 @@ export const targetByGazeDirection: Partial<Record<FullGazeDirection, ScanTarget
   LEFT: 'CURTAIN',
   RIGHT: 'FAN',
   UP: 'LIGHT',
+  DOWN: 'CAMERA',
   CENTER: 'TV'
 };
 
 export function arduinoStatusText(status: string) {
   if (status === 'UNSUPPORTED') return 'Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다';
   if (status === 'CONNECTING') return 'Arduino 연결 중';
+  if (status === 'RECONNECTING') return 'Arduino 재연결 중';
   if (status === 'CONNECTED') return 'Arduino 연결됨';
   if (status === 'ERROR') return 'Arduino 연결 오류';
   return 'Arduino 미연결';
