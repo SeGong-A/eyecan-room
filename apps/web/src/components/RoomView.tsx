@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode, RefObject } from 'react';
+import type { CSSProperties, ReactNode, RefCallback } from 'react';
 import { arduinoStatusText, directionLabel } from '../domain/control';
 import type { AppState } from '../store/useAppStore';
 import type { FullGazeDirection } from '../types/control';
@@ -7,7 +7,7 @@ type RoomViewProps = {
   children: ReactNode;
   gazeCursor: { x: string; y: string };
   roomCameraReady: boolean;
-  roomVideoRef: RefObject<HTMLVideoElement | null>;
+  roomVideoRef: RefCallback<HTMLVideoElement>;
   store: AppState;
   visibleGazeDirection: FullGazeDirection;
   onConnectArduino: () => void;

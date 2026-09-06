@@ -13,7 +13,12 @@ function stopStream(stream: MediaStream | null) {
 }
 
 export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // A plain useRef survives only as long as one DOM node does. Setup and room
+  // views mount two different <video> elements for the same camera at
+  // different times, so we need a callback ref: it fires (and re-attaches the
+  // live stream) every time a new element takes over, not just when `status`
+  // changes.
+  const nodeRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [status, setStatus] = useState<CameraStatus>('IDLE');
   const [devices, setDevices] = useState<CameraDevice[]>([]);
@@ -38,8 +43,8 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
   const disconnect = useCallback(() => {
     stopStream(streamRef.current);
     streamRef.current = null;
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    if (nodeRef.current) {
+      nodeRef.current.srcObject = null;
     }
     setStatus('IDLE');
     setError(null);
@@ -56,8 +61,8 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
     setError(null);
     stopStream(streamRef.current);
     streamRef.current = null;
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    if (nodeRef.current) {
+      nodeRef.current.srcObject = null;
     }
 
     try {
@@ -75,9 +80,9 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
         setStatus('IDLE');
       }, { once: true });
       setSelectedDeviceId(activeDeviceId);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      if (nodeRef.current) {
+        nodeRef.current.srcObject = stream;
+        await nodeRef.current.play();
       }
 
       setStatus('READY');
@@ -109,14 +114,16 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
     };
   }, [refreshDevices]);
 
-  useEffect(() => {
-    if (status !== 'READY' || !videoRef.current || !streamRef.current) {
-      return;
+  // Runs every time a <video> element using this ref mounts (e.g. the
+  // SetupFlow preview handing off to the RoomView feed), so the live stream
+  // always follows the ref to whichever element is on screen now.
+  const videoRef = useCallback((node: HTMLVideoElement | null) => {
+    nodeRef.current = node;
+    if (node && streamRef.current) {
+      node.srcObject = streamRef.current;
+      void node.play();
     }
-
-    videoRef.current.srcObject = streamRef.current;
-    void videoRef.current.play();
-  }, [status]);
+  }, []);
 
   return {
     videoRef,

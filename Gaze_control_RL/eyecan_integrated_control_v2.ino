@@ -44,11 +44,6 @@ int extraAngle = HOME_ANGLE;
 int panAngle = HOME_ANGLE;
 int tiltAngle = HOME_ANGLE;
 
-bool camUsedW = false;
-bool camUsedA = false;
-bool camUsedS = false;
-bool camUsedD = false;
-
 enum Mode { MODE_MENU, MODE_CAMERA, MODE_SERVO, MODE_LIGHT, MODE_FAN };
 Mode currentMode = MODE_MENU;
 
@@ -106,50 +101,26 @@ void writeExtraServo() {
   extraServo.write(extraAngle);
 }
 
-void resetCameraDirectionLocks() {
-  camUsedW = false;
-  camUsedA = false;
-  camUsedS = false;
-  camUsedD = false;
-}
-
 void writeCameraServos() {
   panServo.write(panAngle);
   tiltServo.write(tiltAngle);
 }
 
+// 웹 UI가 시선이 화면 가장자리에 머무는 동안 같은 방향 명령을 계속 반복 전송해서
+// 팬틸트를 상시 제어한다(apps/web/src/hooks/useGazePanTilt.ts). 그래서 방향당 1회로
+// 제한하던 잠금은 없앴다 - 매번 STEP_SIZE만큼 누적 이동하고 0~180 범위로만 clamp한다.
 bool moveCameraOnce(char direction) {
   switch (direction) {
     case 'w':
-      if (camUsedW) {
-        Serial.println("이미 위로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return false;
-      }
-      camUsedW = true;
       tiltAngle = constrain(tiltAngle + STEP_SIZE, 0, 180);
       return true;
     case 's':
-      if (camUsedS) {
-        Serial.println("이미 아래로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return false;
-      }
-      camUsedS = true;
       tiltAngle = constrain(tiltAngle - STEP_SIZE, 0, 180);
       return true;
     case 'a':
-      if (camUsedA) {
-        Serial.println("이미 왼쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return false;
-      }
-      camUsedA = true;
       panAngle = constrain(panAngle - STEP_SIZE, 0, 180);
       return true;
     case 'd':
-      if (camUsedD) {
-        Serial.println("이미 오른쪽으로 이동했습니다. (한 방향당 1회만 가능) | c=중앙복귀 m=메뉴복귀");
-        return false;
-      }
-      camUsedD = true;
       panAngle = constrain(panAngle + STEP_SIZE, 0, 180);
       return true;
     default:
@@ -238,7 +209,6 @@ void applyCamera(String rawInput) {
   if (c == 'c') {
     panAngle = HOME_ANGLE;
     tiltAngle = HOME_ANGLE;
-    resetCameraDirectionLocks();
     writeCameraServos();
     Serial.println("[중앙 복귀] Pan/Tilt | 계속 입력하거나 'm'으로 메뉴 복귀");
     return;

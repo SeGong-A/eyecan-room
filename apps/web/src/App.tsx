@@ -11,16 +11,16 @@ import {
   scanItems,
   scanSpeedItems,
   settingsRootItems,
-  targetByGazeDirection,
   targetChoiceItems,
   targetMeta,
   themeItems
 } from './domain/control';
 import { useArduinoController } from './hooks/useArduinoController';
 import { useCamera } from './hooks/useCamera';
+import { useGazePanTilt } from './hooks/useGazePanTilt';
 import { useRotationScanner } from './hooks/useRotationScanner';
 import { useAppStore } from './store/useAppStore';
-import type { CommandItem, CommandLogItem, FullGazeDirection, ScanTarget, SetupStage } from './types/control';
+import type { CommandItem, CommandLogItem, ScanTarget, SetupStage } from './types/control';
 import { clamp } from './utils/gaze';
 
 function App() {
@@ -32,6 +32,7 @@ function App() {
   const [showCalibration, setShowCalibration] = useState(false);
   const [toast, setToast] = useState('');
   const [commandLog, setCommandLog] = useState<CommandLogItem[]>([]);
+  const canShowRoomControl = setupStage === 'ROOM';
   const scanList = useMemo(() => {
     if (store.interactionMode === 'SETTINGS') return settingsRootItems;
     if (store.interactionMode === 'SETTINGS_SUBMENU') {
@@ -45,6 +46,13 @@ function App() {
     store.isPaused,
     store.scanIntervalMs,
     scanList.length
+  );
+  useGazePanTilt(
+    store.gazeDirection,
+    store.arduinoStatus,
+    store.isPaused,
+    canShowRoomControl,
+    sendArduinoCommand
   );
   const lastProcessedBlinkSequenceRef = useRef(0);
 
@@ -91,7 +99,7 @@ function App() {
     if (store.isPaused) return;
 
     if (store.interactionMode === 'EXPLORE') {
-      await openRotationUiForDirection(store.gazeDirection);
+      openTargetChoice();
       return;
     }
 
@@ -105,7 +113,11 @@ function App() {
       return;
     }
     if (store.interactionMode === 'TARGET_CHOICE') {
-      const selectedTarget: ScanTarget = item.command === 'TARGET_WINDOW' ? 'WINDOW' : 'CURTAIN';
+      if (!item.command.startsWith('TARGET_')) {
+        await returnToExplore('선택을 취소합니다');
+        return;
+      }
+      const selectedTarget = item.command.replace('TARGET_', '') as ScanTarget;
       store.setSelectedTarget(selectedTarget);
       store.setInteractionMode('COMMAND');
       await chooseSharedTarget(selectedTarget);
@@ -210,20 +222,11 @@ function App() {
     await sendRequest(`/state/target?target=${target}`);
     await sendRequest('/state/mode?mode=COMMAND');
   }
-  async function openRotationUiForDirection(direction: FullGazeDirection) {
-    const gazeTarget = targetByGazeDirection[direction];
-    if (!gazeTarget) {
-      setToast('이 방향은 선택 대상이 없습니다');
-      store.setInteractionMode('EXPLORE');
-      return;
-    }
-
-    store.setSelectedTarget(gazeTarget);
-    store.setInteractionMode('COMMAND');
+  function openTargetChoice() {
+    // 시선 방향은 팬틸트 카메라 전용이라(useGazePanTilt), 대상 선택은 방향과
+    // 상관없이 항상 선풍기/조명/TV/커튼/창문 5개 순환 목록을 연다.
+    store.setInteractionMode('TARGET_CHOICE');
     store.setScanStep(0);
-    await chooseSharedTarget(gazeTarget);
-    store.setInteractionMode('COMMAND');
-    setToast(`${targetMeta[gazeTarget].name} 로테이션 UI를 열었습니다`);
   }
   async function captureCalibrationStep() {
     const expectedDirection = calibrationSteps[calibrationIndex];
@@ -260,12 +263,11 @@ function App() {
   const radialTarget = isSettingsMode
     ? { name: store.settingsMenu === 'SCAN_SPEED' ? '로테이션 시간' : store.settingsMenu === 'THEME' ? '화면 모드' : '설정', icon: '⚙' }
     : isTargetChoice
-    ? { name: '커튼 · 창문', icon: '▥' }
+    ? { name: '대상 선택', icon: '◎' }
     : targetMeta[store.selectedTarget];
   const cameraReady = eyeCamera.status === 'READY';
   const roomCameraReady = roomCamera.status === 'READY';
   const gazeTrackingReady = cameraReady || store.visionStatus === 'STARTING' || store.visionStatus === 'RUNNING';
-  const canShowRoomControl = setupStage === 'ROOM';
   const activeGazePoint = {
     x: clamp(0.5 + (store.lastGazePoint.x - 0.5) * 2.4, 0.08, 0.92),
     y: clamp(0.5 + (store.lastGazePoint.y - 0.5) * 2.4, 0.1, 0.9)
