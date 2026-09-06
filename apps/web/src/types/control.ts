@@ -1,6 +1,6 @@
 export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT';
 export type FullGazeDirection = GazeDirection | 'UP' | 'DOWN';
-export type ScanTarget = 'FAN' | 'LIGHT' | 'TV' | 'CURTAIN' | 'WINDOW' | 'CAMERA';
+export type ScanTarget = 'FAN' | 'LIGHT' | 'TV' | 'CURTAIN' | 'WINDOW';
 export type InteractionMode = 'EXPLORE' | 'TARGET_CHOICE' | 'COMMAND' | 'SETTINGS' | 'SETTINGS_SUBMENU';
 export type ThemeMode = 'light' | 'dark';
 export type SettingsMenu = 'ROOT' | 'SCAN_SPEED' | 'THEME';

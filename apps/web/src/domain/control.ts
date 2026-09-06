@@ -5,11 +5,15 @@ export const targetMeta: Record<ScanTarget, TargetMeta> = {
   LIGHT: { name: '조명', icon: '☀' },
   TV: { name: 'TV', icon: '▣' },
   CURTAIN: { name: '커튼', icon: '▥' },
-  WINDOW: { name: '창문', icon: '▦' },
-  CAMERA: { name: '카메라', icon: '⊹' }
+  WINDOW: { name: '창문', icon: '▦' }
 };
 
+// 시선 방향은 이제 팬틸트 카메라 전용이라, 대상 선택은 방향과 무관하게
+// 깜빡임만으로 이 5개를 순환하며 고른다 (useGazePanTilt.ts 참고).
 export const targetChoiceItems: CommandItem[] = [
+  { label: '선풍기', description: '선풍기를 제어합니다', command: 'TARGET_FAN' },
+  { label: '조명', description: '조명을 제어합니다', command: 'TARGET_LIGHT' },
+  { label: 'TV', description: 'TV를 제어합니다', command: 'TARGET_TV' },
   { label: '커튼', description: '커튼을 제어합니다', command: 'TARGET_CURTAIN' },
   { label: '창문', description: '창문을 제어합니다', command: 'TARGET_WINDOW' },
   { label: '돌아가기', description: '방 둘러보기로 돌아갑니다', command: 'BACK' }
@@ -67,14 +71,6 @@ export const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '닫기', description: '창문을 닫습니다', command: 'WINDOW_CLOSE' },
     { label: '멈춤', description: '창문을 멈춥니다', command: 'WINDOW_STOP' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
-  ],
-  CAMERA: [
-    { label: '왼쪽', description: '카메라를 왼쪽으로 돌립니다', command: 'CAM_LEFT' },
-    { label: '오른쪽', description: '카메라를 오른쪽으로 돌립니다', command: 'CAM_RIGHT' },
-    { label: '위', description: '카메라를 위로 올립니다', command: 'CAM_UP' },
-    { label: '아래', description: '카메라를 아래로 내립니다', command: 'CAM_DOWN' },
-    { label: '가운데', description: '카메라를 가운데로 정렬합니다', command: 'CAM_STOP' },
-    { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ]
 };
 
@@ -94,14 +90,6 @@ export const directionLabel: Record<FullGazeDirection, string> = {
   RIGHT: '오른쪽',
   UP: '위',
   DOWN: '아래'
-};
-
-export const targetByGazeDirection: Partial<Record<FullGazeDirection, ScanTarget>> = {
-  LEFT: 'CURTAIN',
-  RIGHT: 'FAN',
-  UP: 'LIGHT',
-  DOWN: 'CAMERA',
-  CENTER: 'TV'
 };
 
 export function arduinoStatusText(status: string) {
