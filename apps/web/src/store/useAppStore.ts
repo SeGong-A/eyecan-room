@@ -44,6 +44,7 @@ export type AppState = {
   lastBlinkEvent: 'NONE' | 'SHORT' | 'SELECT' | 'CANCEL';
   blinkSequence: number;
   lastGazePoint: { x: number; y: number };
+  gazeOmega: { x: number; y: number };
   lastCommand: string;
   visionStatus: 'STOPPED' | 'STARTING' | 'RUNNING' | 'ERROR';
   visionError: string | null;
@@ -82,6 +83,8 @@ export type AppState = {
     blink_sequence: number;
     last_gaze_point_x: number;
     last_gaze_point_y: number;
+    gaze_omega_x: number;
+    gaze_omega_y: number;
     last_command: string;
     vision_status: AppState['visionStatus'];
     vision_error: string | null;
@@ -104,6 +107,7 @@ export const useAppStore = create<AppState>((set) => ({
   lastBlinkEvent: 'NONE',
   blinkSequence: 0,
   lastGazePoint: { x: 0.5, y: 0.5 },
+  gazeOmega: { x: 0, y: 0 },
   lastCommand: 'NONE',
   visionStatus: 'STOPPED',
   visionError: null,
@@ -166,6 +170,10 @@ export const useAppStore = create<AppState>((set) => ({
         lastGazePoint: {
           x: payload.last_gaze_point_x ?? state.lastGazePoint.x,
           y: payload.last_gaze_point_y ?? state.lastGazePoint.y
+        },
+        gazeOmega: {
+          x: payload.gaze_omega_x ?? state.gazeOmega.x,
+          y: payload.gaze_omega_y ?? state.gazeOmega.y
         }
       };
     })
