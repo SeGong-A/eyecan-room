@@ -14,6 +14,8 @@ class GazeSample:
     y: float
     ear: float
     face_detected: bool
+    omega_x: float = 0.0
+    omega_y: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -97,7 +99,7 @@ class AdaptiveGazeController:
 
         return np.array([((l_dx + r_dx) / 2.0) * 4.5, ((l_dy + r_dy) / 2.0) * 9.0], dtype=np.float32), ear
 
-    def update(self, landmarks: list[object]) -> tuple[float, float, float]:
+    def update(self, landmarks: list[object]) -> tuple[float, float, float, float, float]:
         np = self.np
 
         current_time = time.time()
@@ -172,7 +174,10 @@ class AdaptiveGazeController:
         self.prev_omega = omega.copy()
         point_x = _clip(0.5 + float(omega[0]) * 0.32, 0.0, 1.0)
         point_y = _clip(0.5 + float(omega[1]) * 0.32, 0.0, 1.0)
-        return point_x, point_y, ear
+        # omega는 조이스틱형 팬/틸트 속도 지령(P-제어기 출력)이다. point_x/point_y로
+        # 뭉개기 전의 원값을 그대로 같이 반환해 실제 카메라 구동(useGazePanTilt.ts)이
+        # 비례 제어에 쓸 수 있게 한다.
+        return point_x, point_y, ear, float(omega[0]), float(omega[1])
 
 
 class VisionGazeTracker:
@@ -256,12 +261,12 @@ class VisionGazeTracker:
                 result = landmarker.detect(mp_image)
 
                 if not result.face_landmarks:
-                    on_sample(GazeSample(x=0.5, y=0.5, ear=0.0, face_detected=False))
+                    on_sample(GazeSample(x=0.5, y=0.5, ear=0.0, face_detected=False, omega_x=0.0, omega_y=0.0))
                     time.sleep(0.03)
                     continue
 
-                x, y, ear = controller.update(result.face_landmarks[0])
-                on_sample(GazeSample(x=x, y=y, ear=ear, face_detected=True))
+                x, y, ear, omega_x, omega_y = controller.update(result.face_landmarks[0])
+                on_sample(GazeSample(x=x, y=y, ear=ear, face_detected=True, omega_x=omega_x, omega_y=omega_y))
                 time.sleep(0.03)
         except Exception as exc:
             self._set_error(str(exc))

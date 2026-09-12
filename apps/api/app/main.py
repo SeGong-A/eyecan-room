@@ -26,6 +26,8 @@ class ControlState:
     blink_sequence: int = 0
     last_gaze_point_x: float = 0.5
     last_gaze_point_y: float = 0.5
+    gaze_omega_x: float = 0.0
+    gaze_omega_y: float = 0.0
     last_command: str = "NONE"
     vision_status: str = "STOPPED"
     vision_error: str | None = None
@@ -171,6 +173,10 @@ def receive_vision_sample(sample: GazeSample) -> None:
     state.vision_error = vision_tracker.error
     state.face_detected = sample.face_detected
     state.eye_aspect_ratio = sample.ear
+    # 얼굴을 놓치면 sample.omega_x/y가 이미 0.0으로 오므로, 여기서 얼굴 검출 여부와
+    # 무관하게 그대로 반영하면 "얼굴 인식 실패 시 팬틸트 정지"까지 자연히 해결된다.
+    state.gaze_omega_x = sample.omega_x
+    state.gaze_omega_y = sample.omega_y
 
     blink_event = blink_machine.update(
         is_closed=sample.face_detected and sample.ear < 0.2,

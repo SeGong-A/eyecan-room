@@ -108,20 +108,22 @@ void writeCameraServos() {
 
 // 웹 UI가 시선이 화면 가장자리에 머무는 동안 같은 방향 명령을 계속 반복 전송해서
 // 팬틸트를 상시 제어한다(apps/web/src/hooks/useGazePanTilt.ts). 그래서 방향당 1회로
-// 제한하던 잠금은 없앴다 - 매번 STEP_SIZE만큼 누적 이동하고 0~180 범위로만 clamp한다.
-bool moveCameraOnce(char direction) {
+// 제한하던 잠금은 없앴다 - 매번 stepSize만큼 누적 이동하고 0~180 범위로만 clamp한다.
+// stepSize는 웹 UI가 시선이 중심에서 벗어난 정도에 비례해 넘겨주는 값이고(조이스틱형
+// 제어), 시리얼 모니터에서 숫자 없이 문자만 입력하면 기본값 STEP_SIZE(45도)가 쓰인다.
+bool moveCameraOnce(char direction, int stepSize) {
   switch (direction) {
     case 'w':
-      tiltAngle = constrain(tiltAngle + STEP_SIZE, 0, 180);
+      tiltAngle = constrain(tiltAngle + stepSize, 0, 180);
       return true;
     case 's':
-      tiltAngle = constrain(tiltAngle - STEP_SIZE, 0, 180);
+      tiltAngle = constrain(tiltAngle - stepSize, 0, 180);
       return true;
     case 'a':
-      panAngle = constrain(panAngle - STEP_SIZE, 0, 180);
+      panAngle = constrain(panAngle - stepSize, 0, 180);
       return true;
     case 'd':
-      panAngle = constrain(panAngle + STEP_SIZE, 0, 180);
+      panAngle = constrain(panAngle + stepSize, 0, 180);
       return true;
     default:
       Serial.println("w(위)/a(왼쪽)/s(아래)/d(오른쪽)/c(중앙복귀)/m(메뉴복귀) 중 입력하세요.");
@@ -214,7 +216,17 @@ void applyCamera(String rawInput) {
     return;
   }
 
-  if (!moveCameraOnce(c)) return;
+  // 문자 뒤에 공백+숫자가 있으면(예: "w 12") 그 값을 이번 이동의 스텝 크기로 쓰고,
+  // 없으면 기존과 동일하게 기본 STEP_SIZE(45도)를 쓴다 — 시리얼 모니터에 수동으로
+  // 문자만 입력해도 기존 그대로 동작.
+  int stepSize = STEP_SIZE;
+  int spaceIndex = input.indexOf(' ');
+  if (spaceIndex != -1) {
+    int parsedStep = input.substring(spaceIndex + 1).toInt();
+    if (parsedStep > 0) stepSize = constrain(parsedStep, 1, 180);
+  }
+
+  if (!moveCameraOnce(c, stepSize)) return;
 
   writeCameraServos();
 

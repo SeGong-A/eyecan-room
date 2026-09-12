@@ -48,7 +48,7 @@ function App() {
     scanList.length
   );
   useGazePanTilt(
-    store.gazeDirection,
+    store.gazeOmega,
     store.arduinoStatus,
     store.isPaused,
     canShowRoomControl,

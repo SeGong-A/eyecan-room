@@ -353,10 +353,16 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
     return { sequence: ['m', '2', String(nextServoAngle)], nextServoAngle };
   }
 
-  if (command === 'CAM_LEFT') return { sequence: ['m', '1', 'a'] };
-  if (command === 'CAM_RIGHT') return { sequence: ['m', '1', 'd'] };
-  if (command === 'CAM_UP') return { sequence: ['m', '1', 'w'] };
-  if (command === 'CAM_DOWN') return { sequence: ['m', '1', 's'] };
+  // CAM_LEFT/RIGHT/UP/DOWN은 선택적으로 ":<도수>" 접미사를 받는다(예: 'CAM_LEFT:12') —
+  // useGazePanTilt.ts가 시선이 중심에서 벗어난 정도에 비례한 스텝 크기를 실어 보낼 때 씀.
+  // 접미사가 없으면 문자 하나만 보내 펌웨어 기본 STEP_SIZE(45도)를 그대로 쓴다 —
+  // 기존 CAM_LEFT 등 호출과 100% 하위 호환.
+  const camMatch = command.match(/^CAM_(LEFT|RIGHT|UP|DOWN)(?::(\d+))?$/);
+  if (camMatch) {
+    const [, direction, degrees] = camMatch;
+    const char = { LEFT: 'a', RIGHT: 'd', UP: 'w', DOWN: 's' }[direction as 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'];
+    return { sequence: ['m', '1', degrees ? `${char} ${degrees}` : char] };
+  }
   if (command === 'CAM_STOP') return { sequence: ['m', '1', 'c'] };
 
   return null;
