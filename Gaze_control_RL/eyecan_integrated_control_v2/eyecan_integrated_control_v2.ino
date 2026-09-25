@@ -32,7 +32,9 @@ const int CAM_PAN_PIN = 8;
 const int CAM_TILT_PIN = 9;
 
 const int STEP_SIZE = 45;
-const int HOME_ANGLE = 90;
+const int PAN_HOME_ANGLE = 90;
+const int TILT_HOME_ANGLE = 20;
+const int EXTRA_HOME_ANGLE = 90;
 
 Servo extraServo;
 Servo panServo;
@@ -40,9 +42,9 @@ Servo tiltServo;
 
 int lightLevel = 0;
 int fanLevel = 0;
-int extraAngle = HOME_ANGLE;
-int panAngle = HOME_ANGLE;
-int tiltAngle = HOME_ANGLE;
+int extraAngle = EXTRA_HOME_ANGLE;
+int panAngle = PAN_HOME_ANGLE;
+int tiltAngle = TILT_HOME_ANGLE;
 
 enum Mode { MODE_MENU, MODE_CAMERA, MODE_SERVO, MODE_LIGHT, MODE_FAN };
 Mode currentMode = MODE_MENU;
@@ -74,6 +76,7 @@ void backToMenu() {
 }
 
 bool checkReturnToMenu(String input) {
+  input.trim();
   if (input.equalsIgnoreCase("m")) {
     backToMenu();
     return true;
@@ -178,7 +181,7 @@ void applyExtraServo(String rawInput) {
   if (checkReturnToMenu(input)) return;
 
   if (input.equalsIgnoreCase("c")) {
-    extraAngle = HOME_ANGLE;
+    extraAngle = EXTRA_HOME_ANGLE;
     writeExtraServo();
     Serial.print("[중앙 복귀] 각도: ");
     Serial.print(extraAngle);
@@ -209,8 +212,8 @@ void applyCamera(String rawInput) {
   char c = tolower(input.charAt(0));
 
   if (c == 'c') {
-    panAngle = HOME_ANGLE;
-    tiltAngle = HOME_ANGLE;
+    panAngle = PAN_HOME_ANGLE;
+    tiltAngle = TILT_HOME_ANGLE;
     writeCameraServos();
     Serial.println("[중앙 복귀] Pan/Tilt | 계속 입력하거나 'm'으로 메뉴 복귀");
     return;
@@ -277,9 +280,9 @@ void setup() {
   panServo.attach(CAM_PAN_PIN);
   tiltServo.attach(CAM_TILT_PIN);
 
-  extraServo.write(HOME_ANGLE);
-  panServo.write(HOME_ANGLE);
-  tiltServo.write(HOME_ANGLE);
+  extraServo.write(EXTRA_HOME_ANGLE);
+  panServo.write(PAN_HOME_ANGLE);
+  tiltServo.write(TILT_HOME_ANGLE);
 
   delay(200);
   printMenu();

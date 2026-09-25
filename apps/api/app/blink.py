@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from collections import deque
 
 
 class BlinkEventType(str, Enum):
@@ -43,3 +44,35 @@ class BlinkStateMachine:
         if self.thresholds.short_min_ms <= duration_ms <= self.thresholds.short_max_ms:
             return BlinkEventType.SHORT
         return BlinkEventType.NONE
+
+    def reset(self) -> None:
+        self._closed_since_ms = None
+
+
+class EmergencyBlinkDetector:
+    def __init__(self, required_count: int = 4, window_ms: int = 2000, cooldown_ms: int = 3000) -> None:
+        self.required_count = required_count
+        self.window_ms = window_ms
+        self.cooldown_ms = cooldown_ms
+        self._short_blinks: deque[int] = deque()
+        self._cooldown_until_ms = 0
+
+    def register(self, event: BlinkEventType, now_ms: int) -> bool:
+        if event != BlinkEventType.SHORT:
+            if event in (BlinkEventType.SELECT, BlinkEventType.CANCEL):
+                self._short_blinks.clear()
+            return False
+        if now_ms < self._cooldown_until_ms:
+            return False
+        self._short_blinks.append(now_ms)
+        while self._short_blinks and now_ms - self._short_blinks[0] > self.window_ms:
+            self._short_blinks.popleft()
+        if len(self._short_blinks) < self.required_count:
+            return False
+        self._short_blinks.clear()
+        return True
+
+    def reset(self, now_ms: int = 0, with_cooldown: bool = False) -> None:
+        self._short_blinks.clear()
+        if with_cooldown:
+            self._cooldown_until_ms = now_ms + self.cooldown_ms

@@ -4,10 +4,10 @@ import asyncio
 from dataclasses import dataclass, asdict
 import time
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .blink import BlinkEventType, BlinkStateMachine
+from .blink import BlinkEventType, BlinkStateMachine, EmergencyBlinkDetector
 from .gaze import GazeClassifier, GazePoint
 from .vision import GazeSample, VisionGazeTracker
 
@@ -15,7 +15,7 @@ from .vision import GazeSample, VisionGazeTracker
 @dataclass
 class ControlState:
     gaze_direction: str = "CENTER"
-    selected_target: str = "TV"
+    selected_target: str = "IPAD"
     interaction_mode: str = "EXPLORE"
     is_calibrated: bool = False
     is_paused: bool = False
@@ -33,6 +33,11 @@ class ControlState:
     vision_error: str | None = None
     face_detected: bool = False
     eye_aspect_ratio: float = 0.0
+    gaze_ready: bool = False
+    learning_enabled: bool = True
+    learning_update_count: int = 0
+    emergency_active: bool = False
+    emergency_sequence: int = 0
 
 
 app = FastAPI(title="EyeCan Room API", version="0.1.0")
@@ -46,6 +51,7 @@ app.add_middleware(
 
 state = ControlState()
 blink_machine = BlinkStateMachine()
+emergency_detector = EmergencyBlinkDetector()
 gaze_classifier = GazeClassifier()
 vision_tracker = VisionGazeTracker()
 active_websockets: set[WebSocket] = set()
@@ -69,14 +75,28 @@ def update_gaze_point(x: float, y: float) -> str:
     return direction.value
 
 
-def apply_blink_event(event: BlinkEventType) -> None:
+def apply_blink_event(event: BlinkEventType, now_ms: int) -> None:
     state.last_blink_event = event.value
     if event.value != BlinkEventType.NONE.value:
         state.blink_sequence += 1
-    if event == BlinkEventType.CANCEL:
-        state.is_paused = not state.is_paused
+    if emergency_detector.register(event, now_ms):
+        state.emergency_active = True
+        state.emergency_sequence += 1
+        state.is_paused = True
         state.interaction_mode = "EXPLORE"
         reset_scan_position()
+        return
+    if event == BlinkEventType.CANCEL and state.emergency_active:
+        clear_emergency(now_ms)
+    elif event == BlinkEventType.CANCEL:
+        state.interaction_mode = "EXPLORE"
+        reset_scan_position()
+
+
+def clear_emergency(now_ms: int) -> None:
+    state.emergency_active = False
+    state.is_paused = False
+    emergency_detector.reset(now_ms, with_cooldown=True)
 
 
 def schedule_broadcast_state() -> None:
@@ -156,7 +176,7 @@ async def update_scan_speed(scan_interval_ms: int) -> dict[str, object]:
 @app.post("/events/blink")
 async def receive_blink_event(is_closed: bool, now_ms: int) -> dict[str, object]:
     event = blink_machine.update(is_closed=is_closed, now_ms=now_ms)
-    apply_blink_event(event)
+    apply_blink_event(event, now_ms)
     await broadcast_state()
     return {"event": event.value, "state": state_payload()}
 
@@ -173,16 +193,22 @@ def receive_vision_sample(sample: GazeSample) -> None:
     state.vision_error = vision_tracker.error
     state.face_detected = sample.face_detected
     state.eye_aspect_ratio = sample.ear
+    state.gaze_ready = sample.ready
+    state.learning_enabled = sample.learning_enabled
+    state.learning_update_count = sample.learning_update_count
     # 얼굴을 놓치면 sample.omega_x/y가 이미 0.0으로 오므로, 여기서 얼굴 검출 여부와
     # 무관하게 그대로 반영하면 "얼굴 인식 실패 시 팬틸트 정지"까지 자연히 해결된다.
     state.gaze_omega_x = sample.omega_x
     state.gaze_omega_y = sample.omega_y
 
-    blink_event = blink_machine.update(
-        is_closed=sample.face_detected and sample.ear < 0.2,
-        now_ms=int(time.time() * 1000),
-    )
-    apply_blink_event(blink_event)
+    now_ms = int(time.time() * 1000)
+    if not sample.face_detected:
+        blink_machine.reset()
+        emergency_detector.reset()
+        schedule_broadcast_state()
+        return
+    blink_event = blink_machine.update(is_closed=sample.ear < 0.2, now_ms=now_ms)
+    apply_blink_event(blink_event, now_ms)
 
     if sample.face_detected:
         update_gaze_point(x=sample.x, y=sample.y)
@@ -192,9 +218,43 @@ def receive_vision_sample(sample: GazeSample) -> None:
 
 @app.post("/vision/start")
 async def start_vision(camera_index: int = 0) -> dict[str, object]:
+    blink_machine.reset()
+    emergency_detector.reset()
     vision_tracker.start(camera_index=camera_index, on_sample=receive_vision_sample)
     state.vision_status = vision_tracker.status
     state.vision_error = vision_tracker.error
+    await broadcast_state()
+    return state_payload()
+
+
+@app.post("/vision/learning")
+async def set_vision_learning(enabled: bool) -> dict[str, object]:
+    if not vision_tracker.send_control("learning", enabled=enabled):
+        raise HTTPException(status_code=409, detail="Vision tracker is not running")
+    state.learning_enabled = enabled
+    await broadcast_state()
+    return state_payload()
+
+
+@app.post("/vision/model/save")
+async def save_vision_model() -> dict[str, object]:
+    if not vision_tracker.send_control("save"):
+        raise HTTPException(status_code=409, detail="Vision tracker is not running")
+    return {"queued": True}
+
+
+@app.post("/vision/model/reset")
+async def reset_vision_model() -> dict[str, object]:
+    if not vision_tracker.send_control("reset"):
+        raise HTTPException(status_code=409, detail="Vision tracker is not running")
+    state.gaze_ready = False
+    await broadcast_state()
+    return state_payload()
+
+
+@app.post("/emergency/clear")
+async def dismiss_emergency() -> dict[str, object]:
+    clear_emergency(int(time.time() * 1000))
     await broadcast_state()
     return state_payload()
 

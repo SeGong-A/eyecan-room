@@ -3,26 +3,27 @@ import type { CommandItem, FullGazeDirection, ScanTarget, TargetMeta } from '../
 export const targetMeta: Record<ScanTarget, TargetMeta> = {
   FAN: { name: '선풍기', icon: '✣' },
   LIGHT: { name: '조명', icon: '☀' },
-  TV: { name: 'TV', icon: '▣' },
+  IPAD: { name: 'iPad', icon: '▣' },
   CURTAIN: { name: '커튼', icon: '▥' },
-  WINDOW: { name: '창문', icon: '▦' }
 };
 
-// 시선 방향은 이제 팬틸트 카메라 전용이라, 대상 선택은 방향과 무관하게
-// 깜빡임만으로 이 5개를 순환하며 고른다 (useGazePanTilt.ts 참고).
-export const targetChoiceItems: CommandItem[] = [
-  { label: '선풍기', description: '선풍기를 제어합니다', command: 'TARGET_FAN' },
-  { label: '조명', description: '조명을 제어합니다', command: 'TARGET_LIGHT' },
-  { label: 'TV', description: 'TV를 제어합니다', command: 'TARGET_TV' },
-  { label: '커튼', description: '커튼을 제어합니다', command: 'TARGET_CURTAIN' },
-  { label: '창문', description: '창문을 제어합니다', command: 'TARGET_WINDOW' },
-  { label: '돌아가기', description: '방 둘러보기로 돌아갑니다', command: 'BACK' }
-];
-
 export const settingsRootItems: CommandItem[] = [
+  { label: '기기 위치', description: '현재 카메라 각도를 기기 위치로 등록합니다', command: 'SETTINGS_POSITIONS' },
   { label: '로테이션 시간', description: '선택 항목이 넘어가는 속도를 설정합니다', command: 'SETTINGS_SCAN_SPEED' },
   { label: '화면 모드', description: '화면 테마를 선택합니다', command: 'SETTINGS_THEME' },
+  { label: '학습 전환', description: '시선 온라인 학습을 켜거나 끕니다', command: 'SETTINGS_LEARNING' },
+  { label: '학습 저장', description: '현재 개인화 모델을 저장합니다', command: 'SETTINGS_SAVE_MODEL' },
+  { label: '학습 초기화', description: '기본 시선 모델로 되돌립니다', command: 'SETTINGS_RESET_MODEL' },
+  { label: 'iPad 연결', description: '볼륨 제어용 ESP32를 연결합니다', command: 'SETTINGS_IPAD' },
   { label: '닫기', description: '설정을 닫습니다', command: 'SETTINGS_CLOSE' }
+];
+
+export const positionItems: CommandItem[] = [
+  { label: '왼쪽 · 커튼', description: '현재 각도를 커튼 위치로 저장합니다', command: 'POSITION_CURTAIN' },
+  { label: '위 · 조명', description: '현재 각도를 조명 위치로 저장합니다', command: 'POSITION_LIGHT' },
+  { label: '오른쪽 · 선풍기', description: '현재 각도를 선풍기 위치로 저장합니다', command: 'POSITION_FAN' },
+  { label: '정면 · iPad', description: '현재 각도를 iPad 위치로 저장합니다', command: 'POSITION_IPAD' },
+  { label: '돌아가기', description: '설정으로 돌아갑니다', command: 'BACK' }
 ];
 
 export const scanSpeedItems: CommandItem[] = [1, 2, 3, 4, 5].map((seconds) => ({
@@ -52,12 +53,9 @@ export const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '어둡게', description: '밝기를 낮춥니다', command: 'LIGHT_DOWN' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ],
-  TV: [
-    { label: '전원', description: 'TV 전원을 전환합니다', command: 'TV_POWER' },
-    { label: '채널 +', description: '다음 채널', command: 'TV_CH_UP' },
-    { label: '채널 −', description: '이전 채널', command: 'TV_CH_DOWN' },
-    { label: '소리 +', description: '볼륨을 높입니다', command: 'TV_VOL_UP' },
-    { label: '소리 −', description: '볼륨을 낮춥니다', command: 'TV_VOL_DOWN' },
+  IPAD: [
+    { label: '볼륨 +', description: 'iPad 볼륨 올리기 신호를 보냅니다', command: 'IPAD_VOLUME_UP' },
+    { label: '볼륨 −', description: 'iPad 볼륨 내리기 신호를 보냅니다', command: 'IPAD_VOLUME_DOWN' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ],
   CURTAIN: [
@@ -65,23 +63,7 @@ export const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '닫기', description: '커튼을 닫습니다', command: 'CURTAIN_CLOSE' },
     { label: '멈춤', description: '커튼을 멈춥니다', command: 'CURTAIN_STOP' },
     { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
-  ],
-  WINDOW: [
-    { label: '열기', description: '창문을 엽니다', command: 'WINDOW_OPEN' },
-    { label: '닫기', description: '창문을 닫습니다', command: 'WINDOW_CLOSE' },
-    { label: '멈춤', description: '창문을 멈춥니다', command: 'WINDOW_STOP' },
-    { label: '취소', description: '방 둘러보기로 돌아갑니다', command: 'CANCEL' }
   ]
-};
-
-export const calibrationSteps: FullGazeDirection[] = ['CENTER', 'LEFT', 'RIGHT', 'UP', 'DOWN'];
-
-export const calibrationCopy: Record<FullGazeDirection, string> = {
-  CENTER: '화면 가운데를 바라보세요',
-  LEFT: '고개는 그대로, 왼쪽을 바라보세요',
-  RIGHT: '고개는 그대로, 오른쪽을 바라보세요',
-  UP: '고개는 그대로, 위를 바라보세요',
-  DOWN: '고개는 그대로, 아래를 바라보세요'
 };
 
 export const directionLabel: Record<FullGazeDirection, string> = {
