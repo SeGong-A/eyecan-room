@@ -9,7 +9,6 @@ import type {
   SettingsMenu,
   ThemeMode
 } from '../types/control';
-import type { IpadStatus } from '../types/control';
 
 export type {
   ArduinoLevels,
@@ -32,7 +31,24 @@ const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanI
 const storedThemeMode = window.localStorage.getItem('eyecan.themeMode');
 const initialThemeMode: ThemeMode = storedThemeMode === 'dark' ? 'dark' : 'light';
 const storedPositions = window.localStorage.getItem('eyecan.devicePositions');
-const initialDevicePositions: DevicePositions = storedPositions ? JSON.parse(storedPositions) : {};
+const storedPositionTargets: ScanTarget[] = ['CURTAIN', 'LIGHT', 'FAN'];
+const initialDevicePositions: DevicePositions = (() => {
+  if (!storedPositions) return {};
+  try {
+    const parsed = JSON.parse(storedPositions) as Record<string, { pan?: unknown; tilt?: unknown }>;
+    return Object.fromEntries(
+      storedPositionTargets.flatMap((target) => {
+        const position = parsed[target];
+        return position && typeof position.pan === 'number' && typeof position.tilt === 'number'
+          ? [[target, { pan: position.pan, tilt: position.tilt }]]
+          : [];
+      })
+    ) as DevicePositions;
+  } catch {
+    return {};
+  }
+})();
+window.localStorage.setItem('eyecan.devicePositions', JSON.stringify(initialDevicePositions));
 
 export type AppState = {
   gazeDirection: FullGazeDirection;
@@ -67,9 +83,6 @@ export type AppState = {
   hasArduinoAngle: boolean;
   devicePositions: DevicePositions;
   activeAngleTarget: ScanTarget | null;
-  ipadStatus: IpadStatus;
-  ipadError: string | null;
-  ipadBleConnected: boolean;
   setGazeDirection: (direction: FullGazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setInteractionMode: (mode: InteractionMode) => void;
@@ -87,9 +100,6 @@ export type AppState = {
   pushArduinoLogLine: (line: string) => void;
   registerDevicePosition: (target: ScanTarget, position?: { pan: number; tilt: number }) => void;
   setActiveAngleTarget: (target: ScanTarget | null) => void;
-  setIpadStatus: (status: IpadStatus) => void;
-  setIpadError: (error: string | null) => void;
-  setIpadBleConnected: (connected: boolean) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: FullGazeDirection;
     selected_target: ScanTarget;
@@ -120,7 +130,7 @@ export type AppState = {
 
 export const useAppStore = create<AppState>((set) => ({
   gazeDirection: 'CENTER',
-  selectedTarget: 'IPAD',
+  selectedTarget: 'FAN',
   interactionMode: 'EXPLORE',
   isCalibrated: false,
   isPaused: false,
@@ -151,9 +161,6 @@ export const useAppStore = create<AppState>((set) => ({
   hasArduinoAngle: false,
   devicePositions: initialDevicePositions,
   activeAngleTarget: null,
-  ipadStatus: 'DISCONNECTED',
-  ipadError: null,
-  ipadBleConnected: false,
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setInteractionMode: (interactionMode) => set({ interactionMode, scanStep: 0 }),
@@ -192,9 +199,6 @@ export const useAppStore = create<AppState>((set) => ({
     return { devicePositions };
   }),
   setActiveAngleTarget: (activeAngleTarget) => set({ activeAngleTarget }),
-  setIpadStatus: (ipadStatus) => set({ ipadStatus }),
-  setIpadError: (ipadError) => set({ ipadError }),
-  setIpadBleConnected: (ipadBleConnected) => set({ ipadBleConnected }),
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;
@@ -204,7 +208,7 @@ export const useAppStore = create<AppState>((set) => ({
           : serverInteractionMode;
       return {
         gazeDirection: payload.gaze_direction ?? state.gazeDirection,
-        selectedTarget: payload.selected_target && payload.selected_target in { FAN: 1, LIGHT: 1, IPAD: 1, CURTAIN: 1 }
+        selectedTarget: payload.selected_target && payload.selected_target in { FAN: 1, LIGHT: 1, CURTAIN: 1 }
           ? payload.selected_target
           : state.selectedTarget,
         interactionMode,

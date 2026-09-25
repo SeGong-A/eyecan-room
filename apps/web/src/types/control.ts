@@ -1,6 +1,6 @@
 export type GazeDirection = 'CENTER' | 'LEFT' | 'RIGHT';
 export type FullGazeDirection = GazeDirection | 'UP' | 'DOWN';
-export type ScanTarget = 'FAN' | 'LIGHT' | 'IPAD' | 'CURTAIN';
+export type ScanTarget = 'FAN' | 'LIGHT' | 'CURTAIN';
 export type InteractionMode = 'EXPLORE' | 'COMMAND' | 'SETTINGS' | 'SETTINGS_SUBMENU';
 export type ThemeMode = 'light' | 'dark';
 export type SettingsMenu = 'ROOT' | 'SCAN_SPEED' | 'THEME' | 'POSITIONS';
@@ -15,7 +15,6 @@ export type ArduinoLevels = {
 };
 export type DevicePosition = { pan: number; tilt: number };
 export type DevicePositions = Partial<Record<ScanTarget, DevicePosition>>;
-export type IpadStatus = 'UNSUPPORTED' | 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
 
 export type CommandItem = { label: string; description: string; command: string };
 export type CommandLogItem = {

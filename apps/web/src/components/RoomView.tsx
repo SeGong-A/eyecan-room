@@ -60,7 +60,6 @@ export function RoomView({
           {store.arduinoLog.length > 0 && (
             <small>{store.arduinoLog[store.arduinoLog.length - 1]}</small>
           )}
-          <small>iPad 제어 {store.ipadStatus === 'CONNECTED' ? 'USB 연결됨' : '미연결'} · Bluetooth {store.ipadBleConnected ? '페어링됨' : '대기'}</small>
         </div>
         <button
           type="button"
@@ -77,7 +76,6 @@ export function RoomView({
       <div className="angle-demo-controls" aria-label="개발용 카메라 각도 테스트">
         <button type="button" onClick={() => onMockTarget('CURTAIN')}>왼쪽 · 커튼</button>
         <button type="button" onClick={() => onMockTarget('LIGHT')}>위 · 조명</button>
-        <button type="button" onClick={() => onMockTarget('IPAD')}>정면 · iPad</button>
         <button type="button" onClick={() => onMockTarget('FAN')}>오른쪽 · 선풍기</button>
         <button className="demo-blink-button" type="button" onClick={onDemoSelect}>길게 눈감아 선택</button>
       </div>

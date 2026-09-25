@@ -15,7 +15,7 @@ from .vision import GazeSample, VisionGazeTracker
 @dataclass
 class ControlState:
     gaze_direction: str = "CENTER"
-    selected_target: str = "IPAD"
+    selected_target: str = "FAN"
     interaction_mode: str = "EXPLORE"
     is_calibrated: bool = False
     is_paused: bool = False

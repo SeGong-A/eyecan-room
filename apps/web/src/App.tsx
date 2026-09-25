@@ -10,7 +10,6 @@ import { useArduinoController } from './hooks/useArduinoController';
 import { useCamera } from './hooks/useCamera';
 import { useGazePanTilt } from './hooks/useGazePanTilt';
 import { useRotationScanner } from './hooks/useRotationScanner';
-import { connectIpadController, disconnectIpadController, isIpadSerialSupported, sendIpadVolume } from './lib/ipadSerial';
 import { useAppStore } from './store/useAppStore';
 import type { CommandItem, CommandLogItem, ScanTarget, SetupStage } from './types/control';
 import { clamp } from './utils/gaze';
@@ -31,7 +30,7 @@ function App() {
       if (store.settingsMenu === 'POSITIONS') return positionItems;
       return themeItems;
     }
-    return scanItems[store.selectedTarget] ?? scanItems.IPAD;
+    return scanItems[store.selectedTarget] ?? scanItems.FAN;
   }, [store.interactionMode, store.selectedTarget, store.settingsMenu]);
   const { connectArduinoFromUi, disconnectArduinoFromUi, sendArduinoCommand } = useArduinoController(store, setToast);
   const { rotationStep, rotationStepRef } = useRotationScanner(store.interactionMode, store.isPaused || store.emergencyActive, store.scanIntervalMs, scanList.length);
@@ -55,9 +54,6 @@ function App() {
 
   const lastBlinkRef = useRef(0);
   useEffect(() => { document.documentElement.dataset.theme = store.themeMode; }, [store.themeMode]);
-  useEffect(() => {
-    store.setIpadStatus(isIpadSerialSupported() ? 'DISCONNECTED' : 'UNSUPPORTED');
-  }, []);
   useEffect(() => {
     if (setupStage === 'ROOM_CAMERA' && roomCamera.status === 'READY') {
       setSetupStage('ROOM');
@@ -118,16 +114,6 @@ function App() {
     const item = scanList[rotationStepRef.current % scanList.length];
     if (!item || item.command === 'CANCEL') { await returnToExplore('선택을 취소합니다'); return; }
     if (store.interactionMode === 'SETTINGS' || store.interactionMode === 'SETTINGS_SUBMENU') { await selectSetting(item); return; }
-    if (item.command.startsWith('IPAD_VOLUME_')) {
-      if (store.ipadStatus !== 'CONNECTED' || !store.ipadBleConnected) {
-        await returnToExplore('iPad 제어 장치의 USB 연결과 Bluetooth 페어링을 확인해주세요');
-        return;
-      }
-      const result = await sendIpadVolume(item.command.endsWith('UP') ? 'UP' : 'DOWN');
-      await postCommand(item.command, 'iPad', item.label);
-      await returnToExplore(result.message);
-      return;
-    }
     const result = await sendArduinoCommand(item.command);
     await postCommand(item.command, targetMeta[store.selectedTarget].name, item.label);
     await returnToExplore(result.ok ? item.description : `${item.description} · ${result.error}`);
@@ -156,27 +142,10 @@ function App() {
     }
     if (item.command === 'SETTINGS_SAVE_MODEL') { await request('/vision/model/save'); await returnToExplore('개인화 시선 모델 저장을 요청했습니다'); return; }
     if (item.command === 'SETTINGS_RESET_MODEL') { await request('/vision/model/reset'); await returnToExplore('시선 모델을 기본값으로 초기화합니다'); return; }
-    if (item.command === 'SETTINGS_IPAD') { await connectIpad(); await returnToExplore(); }
-  }
-  async function connectIpad() {
-    store.setIpadStatus('CONNECTING'); store.setIpadError(null);
-    try {
-      await disconnectIpadController();
-      await connectIpadController((line) => {
-        if (line === 'BLE_CONNECTED') store.setIpadBleConnected(true);
-        if (line === 'BLE_DISCONNECTED') store.setIpadBleConnected(false);
-        if (line === 'DISCONNECTED') { store.setIpadStatus('DISCONNECTED'); store.setIpadBleConnected(false); }
-        if (line.startsWith('ERR')) store.setIpadError(line);
-      });
-      store.setIpadStatus('CONNECTED');
-      setToast('iPad 제어 장치를 연결했습니다. iPad Bluetooth 페어링을 확인해주세요');
-    } catch (error) {
-      store.setIpadStatus('ERROR'); store.setIpadError(error instanceof Error ? error.message : '연결 오류');
-    }
   }
   function mockTarget(target: ScanTarget) {
     const defaults: Record<ScanTarget, { pan: number; tilt: number }> = {
-      CURTAIN: { pan: 45, tilt: 20 }, LIGHT: { pan: 90, tilt: 55 }, FAN: { pan: 135, tilt: 20 }, IPAD: { pan: 90, tilt: 20 }
+      CURTAIN: { pan: 45, tilt: 20 }, LIGHT: { pan: 90, tilt: 55 }, FAN: { pan: 135, tilt: 20 }
     };
     setDemoAngles(true);
     const position = store.devicePositions[target] ?? defaults[target];

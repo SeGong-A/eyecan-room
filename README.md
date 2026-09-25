@@ -2,15 +2,15 @@
 
 EyeCan Room은 시선과 눈깜박임을 이용해 침상 사용자의 생활환경을 제어하는 시스템입니다.
 
-최종 제어 대상은 선풍기, 조명, 커튼, iPad입니다. Arduino가 회신한 팬틸트 카메라 각도로 현재 대상을
+최종 제어 대상은 선풍기, 조명, 커튼입니다. Arduino가 회신한 팬틸트 카메라 각도로 현재 대상을
 판별하고, 길게 눈을 감으면 해당 기기의 명령 회전 UI를 바로 엽니다.
 
 이 저장소는 역할별로 나눈 작은 모노레포 구조로 구성되어 있습니다.
 
-- `apps/web`: 자동 시선 준비, 스캔 메뉴, Web Serial 기반 Arduino/ESP32 연결을 담당하는 React + TypeScript UI
+- `apps/web`: 자동 시선 준비, 스캔 메뉴, Web Serial 기반 Arduino 연결을 담당하는 React + TypeScript UI
 - `apps/api`: 시선 추적 실행, 시선 상태, WebSocket/HTTP 연동을 담당하는 Python 백엔드
 - `Gaze_control_RL`: 시선 추적 모델과 Arduino 통합 제어 스케치
-- `firmware`: direct command 방식의 Arduino/ESP32 펌웨어와 배선 문서
+- `firmware`: direct command 방식의 Arduino 펌웨어와 배선 문서
 - `configs`: 공통 캘리브레이션 값과 장치 프리셋
 
 ## MVP 기술 스택
@@ -34,10 +34,6 @@ React UI apps/web
 React UI apps/web
         ↓ Web Serial API
 Arduino
-
-React UI apps/web
-        ↓ 별도 Web Serial
-ESP32 BLE HID → iPad 시스템 볼륨
 ```
 
 - UI와 시선 추적은 API로 연결됩니다.
@@ -98,14 +94,6 @@ Gaze_control_RL/residual_gaze_model_v3.zip
 - 스케치를 Arduino에 업로드합니다.
 
 `firmware/eyecan_room.ino`는 direct command 방식의 별도 스케치입니다. 현재 UI의 Web Serial 명령 시퀀스는 메뉴 기반 통합 스케치 기준입니다.
-
-iPad의 모든 앱에서 시스템 볼륨 키를 사용하려면 ESP32 계열 보드가 별도로 필요합니다.
-
-- `firmware/ipad_ble_volume/ipad_ble_volume.ino`를 ESP32에 업로드합니다.
-- ESP32 Arduino 코어와 `ESP32 BLE Keyboard` 라이브러리를 설치합니다.
-- 웹의 설정에서 `iPad 연결`을 선택해 ESP32 USB 포트를 연결합니다.
-- iPad Bluetooth 설정에서 `EyeCan iPad Control`을 페어링합니다.
-- 실제 iPad 모델별 BLE 호환성은 반드시 실기에서 확인합니다.
 
 ### 5. Python API 실행
 
@@ -182,7 +170,7 @@ pnpm dev
 4. `시작하기`를 누르고 정면을 바라보며 자동 기준점 준비를 완료합니다. 수동 5방향 캘리브레이션은 없습니다.
 5. 외장 카메라 연결 단계에서 카메라를 연결합니다.
 6. ROOM 화면 우측 상단의 `Arduino 연결` 버튼을 누르고 브라우저 포트 선택 창에서 Arduino 포트를 선택합니다.
-7. 설정에서 카메라를 각 기기로 향하게 한 뒤 커튼·조명·선풍기·iPad 위치를 등록합니다.
+7. 설정에서 카메라를 각 기기로 향하게 한 뒤 커튼·조명·선풍기 위치를 등록합니다.
 8. 시선으로 카메라를 움직이고 현재 대상이 표시되면 길게 눈감아 해당 기기의 명령 UI를 엽니다.
 9. 원하는 명령이 선택 위치에 오면 다시 길게 눈감습니다.
 

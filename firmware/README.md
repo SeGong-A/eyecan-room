@@ -38,7 +38,7 @@ Per-device wiring instructions live in [WIRING.md](./WIRING.md).
 - `WINDOW_STOP`
 
 TV commands (`TV_POWER`, `TV_CH_UP`, `TV_CH_DOWN`, `TV_VOL_UP`, `TV_VOL_DOWN`) are not
-controlled by this firmware — they're handled by the web/iPad mockup.
+controlled by this firmware — they're handled by the web mockup.
 
 ## Response format
 
