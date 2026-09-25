@@ -230,6 +230,19 @@ test('emergency interrupts every menu, traps focus and requires explicit acknowl
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('emergency clear failure keeps the alert visible and allows retry', async ({ page }) => {
+  const mock = await mockRoom(page);
+  await mock.enterRoom();
+  mock.emit({ emergency_active: true, emergency_sequence: 1 });
+  await page.route('**/emergency/clear', (route) => route.fulfill({ status: 503, body: 'unavailable' }), { times: 1 });
+  await page.getByRole('button', { name: '상황 확인 및 해제' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('해제 요청을 전달하지 못했습니다');
+  await page.getByRole('button', { name: '상황 확인 및 해제' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(mock.requests).toContain('/emergency/clear');
+});
+
 test('200 percent text zoom and reduced motion preserve controls', async ({ page }, info) => {
   const mock = await mockRoom(page);
   await page.emulateMedia({ reducedMotion: 'reduce' });

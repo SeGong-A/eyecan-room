@@ -1,6 +1,6 @@
 import { expect, type Page, type WebSocketRoute } from '@playwright/test';
 
-type Options = { serial?: boolean; theme?: 'light' | 'dark'; cameraError?: string };
+type Options = { serial?: boolean; theme?: 'light' | 'dark'; cameraError?: string; homeFailure?: 'silent' | 'wrong-angle' };
 
 // All camera, serial and API traffic is isolated from the user's running devices.
 export async function mockRoom(page: Page, options: Options = {}) {
@@ -33,7 +33,7 @@ export async function mockRoom(page: Page, options: Options = {}) {
     if (url.pathname === '/emergency/clear') emit({ emergency_active: false, interaction_mode: 'EXPLORE' });
     await route.fulfill({ json: state });
   });
-  await page.addInitScript(({ serial, theme, cameraError }) => {
+  await page.addInitScript(({ serial, theme, cameraError, homeFailure }) => {
     if (theme) localStorage.setItem('eyecan.themeMode', theme);
     const win = window as typeof window & {
       mockCameraError?: string; mockVideoTrack?: MediaStreamTrack; serialWrites: string[];
@@ -75,7 +75,7 @@ export async function mockRoom(page: Page, options: Options = {}) {
     }
     let controller: ReadableStreamDefaultController<Uint8Array>;
     let menu = 'm';
-    let pan = 90, tilt = 20;
+    let pan = 130, tilt = 55;
     const line = (text: string) => controller.enqueue(new TextEncoder().encode(`${text}\n`));
     win.mockAngle = (nextPan, nextTilt) => { pan = nextPan; tilt = nextTilt; line(`A 0 ${pan * 10} ${tilt * 10}`); };
     const port = {
@@ -89,6 +89,12 @@ export async function mockRoom(page: Page, options: Options = {}) {
           if (/^[QHV] /.test(command)) { line(`A ${command.split(' ')[1]} ${pan * 10} ${tilt * 10}`); return; }
           if (command === 'm') { menu = 'm'; line('========================'); return; }
           if (menu === 'm') { menu = command; return; }
+          if (menu === '1' && command === 'c') {
+            if (homeFailure === 'silent') return;
+            if (homeFailure !== 'wrong-angle') { pan = 90; tilt = 20; }
+            line('[중앙 복귀] Pan/Tilt | 계속 입력하거나 m으로 메뉴 복귀');
+            return;
+          }
           if (win.serialReject) { line('잘못된 입력'); return; }
           if (menu === '2') line(`서보모터 이동 완료 -> 각도: ${command}`);
           if (menu === '3') line(`조명 밝기 변경 -> Level ${command}`);

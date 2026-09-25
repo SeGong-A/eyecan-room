@@ -40,6 +40,11 @@ const BAUD_RATE = 9600;
 const WRITE_DELAY_MS = 90;
 const ACK_WAIT_MS = 260;
 const MOTION_ACK_TIMEOUT_MS = 250;
+const CAMERA_HOME_REPORT_TIMEOUT_MS = 5000;
+const CAMERA_HOME_SETTLE_MS = 1000;
+// Keep aligned with PAN_HOME_ANGLE / TILT_HOME_ANGLE in the integrated sketch.
+const CAMERA_HOME_PAN = 90;
+const CAMERA_HOME_TILT = 20;
 const MAX_RECENT_LINES = 40;
 
 let port: SerialPortLike | null = null;
@@ -90,7 +95,7 @@ export function getInitialArduinoStatus(): ArduinoStatus {
 }
 
 export function isArduinoConnected() {
-  return Boolean(port && writer);
+  return Boolean(port && writer && !connectionPromise);
 }
 
 export function isMotionProtocolReady() {
@@ -327,10 +332,39 @@ async function sendMotionLine(lineFactory: (commandId: number) => string): Promi
 }
 
 export async function queryMotionState(): Promise<MotionAck> {
-  const ack = await sendMotionLine((commandId) => `Q ${commandId}`);
+  return sendMotionLine((commandId) => `Q ${commandId}`);
+}
+
+async function initializeCameraHome() {
+  pendingVelocity = null;
+  await sendMotionLine((commandId) => `H ${commandId}`);
+
+  let resolveReport!: () => void;
+  let rejectReport!: (error: Error) => void;
+  const report = new Promise<void>((resolve, reject) => { resolveReport = resolve; rejectReport = reject; });
+  // A write failure can occur before the report is awaited.
+  void report.catch(() => {});
+  const unsubscribe = subscribeArduino((event) => {
+    if (event.type === 'line' && event.line.startsWith('[중앙 복귀] Pan/Tilt')) resolveReport();
+  });
+  const timeout = window.setTimeout(() => rejectReport(new Error('카메라 초기 위치 복귀 응답을 받지 못했습니다. Arduino 연결을 다시 확인해주세요.')), CAMERA_HOME_REPORT_TIMEOUT_MS);
+  try {
+    await enqueueWrite(['m', '1', 'c']);
+    // Drain the verbose 9600-baud menu before starting the strict Q ACK timer.
+    await report;
+  } finally {
+    window.clearTimeout(timeout);
+    unsubscribe();
+  }
+  const home = await queryMotionState();
+  if (Math.abs(home.pan - CAMERA_HOME_PAN) > 0.1 || Math.abs(home.tilt - CAMERA_HOME_TILT) > 0.1) {
+    throw new Error(`카메라 초기 각도가 일치하지 않습니다 (Pan ${home.pan}° / Tilt ${home.tilt}°). 펌웨어의 초기 각도를 확인해주세요.`);
+  }
+  // ACK reports commanded angles, not physical servo feedback. Allow travel
+  // time before fresh gaze samples can start moving the camera again.
+  await sleep(CAMERA_HOME_SETTLE_MS);
   motionProtocolReady = true;
   emit({ type: 'motion-protocol', ready: true });
-  return ack;
 }
 
 export function queueGazeVelocity(panDegPerSecond: number, tiltDegPerSecond: number) {
@@ -397,7 +431,6 @@ async function openArduinoPort(selected: SerialPortLike): Promise<void> {
     await waitForBoardStartup();
     try {
       await queryMotionState();
-      await holdGazeMotion();
     } catch {
       motionProtocolReady = false;
       emit({
@@ -405,8 +438,10 @@ async function openArduinoPort(selected: SerialPortLike): Promise<void> {
         ready: false,
         error: '팬틸트 속도 프로토콜을 확인하지 못했습니다. 최신 Arduino 펌웨어를 업로드해주세요.'
       });
+      await enqueueWrite(['m']);
+      return;
     }
-    await enqueueWrite(['m']);
+    await initializeCameraHome();
   })();
 
   try {
