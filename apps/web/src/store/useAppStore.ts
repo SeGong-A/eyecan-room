@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type {
   ArduinoLevels,
   ArduinoStatus,
+  DevicePositions,
   FullGazeDirection,
   InteractionMode,
   ScanTarget,
@@ -29,6 +30,25 @@ const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanI
   : 2000;
 const storedThemeMode = window.localStorage.getItem('eyecan.themeMode');
 const initialThemeMode: ThemeMode = storedThemeMode === 'dark' ? 'dark' : 'light';
+const storedPositions = window.localStorage.getItem('eyecan.devicePositions');
+const storedPositionTargets: ScanTarget[] = ['CURTAIN', 'LIGHT', 'FAN'];
+const initialDevicePositions: DevicePositions = (() => {
+  if (!storedPositions) return {};
+  try {
+    const parsed = JSON.parse(storedPositions) as Record<string, { pan?: unknown; tilt?: unknown }>;
+    return Object.fromEntries(
+      storedPositionTargets.flatMap((target) => {
+        const position = parsed[target];
+        return position && typeof position.pan === 'number' && typeof position.tilt === 'number'
+          ? [[target, { pan: position.pan, tilt: position.tilt }]]
+          : [];
+      })
+    ) as DevicePositions;
+  } catch {
+    return {};
+  }
+})();
+window.localStorage.setItem('eyecan.devicePositions', JSON.stringify(initialDevicePositions));
 
 export type AppState = {
   gazeDirection: FullGazeDirection;
@@ -50,11 +70,19 @@ export type AppState = {
   visionError: string | null;
   faceDetected: boolean;
   eyeAspectRatio: number;
+  gazeReady: boolean;
+  learningEnabled: boolean;
+  learningUpdateCount: number;
+  emergencyActive: boolean;
+  emergencySequence: number;
   arduinoStatus: ArduinoStatus;
   arduinoError: string | null;
   lastArduinoCommand: string;
   arduinoLevels: ArduinoLevels;
   arduinoLog: string[];
+  hasArduinoAngle: boolean;
+  devicePositions: DevicePositions;
+  activeAngleTarget: ScanTarget | null;
   setGazeDirection: (direction: FullGazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setInteractionMode: (mode: InteractionMode) => void;
@@ -70,6 +98,8 @@ export type AppState = {
   setLastArduinoCommand: (value: string) => void;
   setArduinoLevels: (value: Partial<ArduinoLevels>) => void;
   pushArduinoLogLine: (line: string) => void;
+  registerDevicePosition: (target: ScanTarget, position?: { pan: number; tilt: number }) => void;
+  setActiveAngleTarget: (target: ScanTarget | null) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: FullGazeDirection;
     selected_target: ScanTarget;
@@ -90,12 +120,17 @@ export type AppState = {
     vision_error: string | null;
     face_detected: boolean;
     eye_aspect_ratio: number;
+    gaze_ready: boolean;
+    learning_enabled: boolean;
+    learning_update_count: number;
+    emergency_active: boolean;
+    emergency_sequence: number;
   }>) => void;
 };
 
 export const useAppStore = create<AppState>((set) => ({
   gazeDirection: 'CENTER',
-  selectedTarget: 'TV',
+  selectedTarget: 'FAN',
   interactionMode: 'EXPLORE',
   isCalibrated: false,
   isPaused: false,
@@ -113,11 +148,19 @@ export const useAppStore = create<AppState>((set) => ({
   visionError: null,
   faceDetected: false,
   eyeAspectRatio: 0,
+  gazeReady: false,
+  learningEnabled: true,
+  learningUpdateCount: 0,
+  emergencyActive: false,
+  emergencySequence: 0,
   arduinoStatus: 'DISCONNECTED',
   arduinoError: null,
   lastArduinoCommand: 'NONE',
   arduinoLevels: initialArduinoLevels,
   arduinoLog: [],
+  hasArduinoAngle: false,
+  devicePositions: initialDevicePositions,
+  activeAngleTarget: null,
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setInteractionMode: (interactionMode) => set({ interactionMode, scanStep: 0 }),
@@ -141,9 +184,21 @@ export const useAppStore = create<AppState>((set) => ({
   setArduinoError: (arduinoError) => set({ arduinoError }),
   setLastArduinoCommand: (lastArduinoCommand) => set({ lastArduinoCommand }),
   setArduinoLevels: (value) =>
-    set((state) => ({ arduinoLevels: { ...state.arduinoLevels, ...value } })),
+    set((state) => ({
+      arduinoLevels: { ...state.arduinoLevels, ...value },
+      hasArduinoAngle: state.hasArduinoAngle || typeof value.pan === 'number' || typeof value.tilt === 'number'
+    })),
   pushArduinoLogLine: (line) =>
     set((state) => ({ arduinoLog: [...state.arduinoLog, line].slice(-MAX_ARDUINO_LOG_LINES) })),
+  registerDevicePosition: (target, position) => set((state) => {
+    const devicePositions = {
+      ...state.devicePositions,
+      [target]: position ?? { pan: state.arduinoLevels.pan, tilt: state.arduinoLevels.tilt }
+    };
+    window.localStorage.setItem('eyecan.devicePositions', JSON.stringify(devicePositions));
+    return { devicePositions };
+  }),
+  setActiveAngleTarget: (activeAngleTarget) => set({ activeAngleTarget }),
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;
@@ -153,7 +208,9 @@ export const useAppStore = create<AppState>((set) => ({
           : serverInteractionMode;
       return {
         gazeDirection: payload.gaze_direction ?? state.gazeDirection,
-        selectedTarget: payload.selected_target ?? state.selectedTarget,
+        selectedTarget: payload.selected_target && payload.selected_target in { FAN: 1, LIGHT: 1, CURTAIN: 1 }
+          ? payload.selected_target
+          : state.selectedTarget,
         interactionMode,
         isCalibrated: payload.is_calibrated ?? state.isCalibrated,
         isPaused: payload.is_paused ?? state.isPaused,
@@ -164,9 +221,14 @@ export const useAppStore = create<AppState>((set) => ({
         blinkSequence: payload.blink_sequence ?? state.blinkSequence,
         lastCommand: payload.last_command ?? state.lastCommand,
         visionStatus: payload.vision_status ?? state.visionStatus,
-        visionError: payload.vision_error ?? state.visionError,
+        visionError: payload.vision_error !== undefined ? payload.vision_error : state.visionError,
         faceDetected: payload.face_detected ?? state.faceDetected,
         eyeAspectRatio: payload.eye_aspect_ratio ?? state.eyeAspectRatio,
+        gazeReady: payload.gaze_ready ?? state.gazeReady,
+        learningEnabled: payload.learning_enabled ?? state.learningEnabled,
+        learningUpdateCount: payload.learning_update_count ?? state.learningUpdateCount,
+        emergencyActive: payload.emergency_active ?? state.emergencyActive,
+        emergencySequence: payload.emergency_sequence ?? state.emergencySequence,
         lastGazePoint: {
           x: payload.last_gaze_point_x ?? state.lastGazePoint.x,
           y: payload.last_gaze_point_y ?? state.lastGazePoint.y

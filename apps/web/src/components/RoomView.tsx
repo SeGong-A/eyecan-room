@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode, RefCallback } from 'react';
 import { arduinoStatusText, directionLabel } from '../domain/control';
 import type { AppState } from '../store/useAppStore';
-import type { FullGazeDirection } from '../types/control';
+import type { FullGazeDirection, ScanTarget } from '../types/control';
+import { targetMeta } from '../domain/control';
 
 type RoomViewProps = {
   children: ReactNode;
@@ -13,6 +14,8 @@ type RoomViewProps = {
   onConnectArduino: () => void;
   onDisconnectArduino: () => void;
   onOpenSettings: () => void;
+  onMockTarget: (target: ScanTarget) => void;
+  onDemoSelect: () => void;
 };
 
 export function RoomView({
@@ -24,7 +27,9 @@ export function RoomView({
   visibleGazeDirection,
   onConnectArduino,
   onDisconnectArduino,
-  onOpenSettings
+  onOpenSettings,
+  onMockTarget,
+  onDemoSelect
 }: RoomViewProps) {
   return (
     <section className="room-fullscreen" id="main-view">
@@ -39,6 +44,10 @@ export function RoomView({
         <strong>EyeCan Room</strong>
       </div>
       <button className="room-settings-button" type="button" aria-label="설정" onClick={onOpenSettings}>⚙</button>
+      <div className="current-angle-target">
+        <small>현재 카메라 대상</small>
+        <strong>{store.activeAngleTarget ? targetMeta[store.activeAngleTarget].name : '선택 없음'}</strong>
+      </div>
       <div className={`arduino-panel arduino-${store.arduinoStatus.toLowerCase()}`}>
         <div>
           <strong>{arduinoStatusText(store.arduinoStatus)}</strong>
@@ -63,6 +72,12 @@ export function RoomView({
 
       <div className={`gaze-pill gaze-${visibleGazeDirection.toLowerCase()}`}>
         <span>●</span> 시선 · {directionLabel[visibleGazeDirection]}
+      </div>
+      <div className="angle-demo-controls" aria-label="개발용 카메라 각도 테스트">
+        <button type="button" onClick={() => onMockTarget('CURTAIN')}>왼쪽 · 커튼</button>
+        <button type="button" onClick={() => onMockTarget('LIGHT')}>위 · 조명</button>
+        <button type="button" onClick={() => onMockTarget('FAN')}>오른쪽 · 선풍기</button>
+        <button className="demo-blink-button" type="button" onClick={onDemoSelect}>길게 눈감아 선택</button>
       </div>
       <div className="gaze-cursor" style={{ '--gaze-x': gazeCursor.x, '--gaze-y': gazeCursor.y } as CSSProperties} aria-hidden="true"><i /></div>
 

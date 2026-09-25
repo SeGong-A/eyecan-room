@@ -2,15 +2,15 @@
 
 EyeCan Room은 시선과 눈깜박임을 이용해 침상 사용자의 생활환경을 제어하는 시스템입니다.
 
-최종 제어 대상은 선풍기, 조명, TV, 커튼, 창문입니다. 커튼과 창문은 카메라에서 같은 창가 영역으로
-감지한 뒤, 회전 선택 UI에서 제어 대상을 한 번 더 선택하고 각 장치의 명령 화면으로 이동합니다.
+최종 제어 대상은 선풍기, 조명, 커튼입니다. Arduino가 회신한 팬틸트 카메라 각도로 현재 대상을
+판별하고, 길게 눈을 감으면 해당 기기의 명령 회전 UI를 바로 엽니다.
 
 이 저장소는 역할별로 나눈 작은 모노레포 구조로 구성되어 있습니다.
 
-- `apps/web`: 캘리브레이션, 스캔 메뉴, Web Serial 기반 Arduino 연결을 담당하는 React + TypeScript UI
+- `apps/web`: 자동 시선 준비, 스캔 메뉴, Web Serial 기반 Arduino 연결을 담당하는 React + TypeScript UI
 - `apps/api`: 시선 추적 실행, 시선 상태, WebSocket/HTTP 연동을 담당하는 Python 백엔드
 - `Gaze_control_RL`: 시선 추적 모델과 Arduino 통합 제어 스케치
-- `firmware`: direct command 방식의 Arduino/ESP32 펌웨어와 배선 문서
+- `firmware`: direct command 방식의 Arduino 펌웨어와 배선 문서
 - `configs`: 공통 캘리브레이션 값과 장치 프리셋
 
 ## MVP 기술 스택
@@ -41,6 +41,8 @@ Arduino
 - 계산된 시선 방향, 시선 좌표, 눈깜빡임 이벤트는 `/ws/state` WebSocket으로 UI에 전달됩니다.
 - UI와 Arduino는 API가 아니라 브라우저의 Web Serial API로 직접 연결됩니다.
 - UI의 `/events/command` 호출은 Arduino 제어용이 아니라 API 상태와 로그 동기화용입니다.
+- 시선 추적 worker는 원본 PPO 모델로 추론하면서 90개 유효 샘플마다 온라인 학습을 수행합니다.
+- 2초 안에 짧은 깜빡임 4회를 감지하면 시연용 응급 알림을 고정 표시합니다.
 
 ## 환경 설정
 
@@ -48,7 +50,7 @@ Arduino
 
 - Node.js 20 이상
 - pnpm
-- Python 3.11 이상
+- Python 3.11
 - Chrome 또는 Edge
 - Arduino IDE 또는 Arduino CLI
 - 시선 추적용 내장 카메라
@@ -66,10 +68,14 @@ pnpm build
 
 ```bash
 cd apps/api
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+시선 추적의 MediaPipe FaceLandmarker는 현재 macOS에서 Python 3.11 + `mediapipe==0.10.21` 조합으로 맞춥니다. Python 3.13 + `mediapipe==1.0.1` 조합은 FaceLandmarker 생성 시 Python 프로세스가 종료될 수 있습니다.
+
+이미 `apps/api/.venv`를 Python 3.13으로 만든 적이 있다면 해당 가상환경을 삭제한 뒤 위 명령으로 다시 만듭니다.
 
 시선 추적에 필요한 모델은 아래 위치에 있어야 합니다.
 
@@ -82,12 +88,12 @@ Gaze_control_RL/residual_gaze_model_v3.zip
 
 시연용 Web Serial 연결은 메뉴 기반 스케치와 맞춰져 있습니다.
 
-- Arduino IDE에서 `Gaze_control_RL/eyecan_integrated_control_v2.ino`를 엽니다.
+- Arduino IDE에서 `Gaze_control_RL/eyecan_integrated_control_v2/eyecan_integrated_control_v2.ino`를 엽니다.
 - 보드와 시리얼 포트를 선택합니다.
 - baud rate는 스케치와 동일하게 `9600`을 사용합니다.
 - 스케치를 Arduino에 업로드합니다.
 
-`firmware/eyecan_room.ino`는 direct command 방식의 별도 스케치입니다. 현재 UI의 Web Serial 명령 시퀀스는 `Gaze_control_RL/eyecan_integrated_control_v2.ino` 기준입니다.
+`firmware/eyecan_room.ino`는 direct command 방식의 별도 스케치입니다. 현재 UI의 Web Serial 명령 시퀀스는 메뉴 기반 통합 스케치 기준입니다.
 
 ### 5. Python API 실행
 
@@ -127,7 +133,7 @@ Vite 개발 서버는 `/vision`, `/state`, `/events`, `/ws` 요청을 `http://12
 
 ```bash
 cd /Users/youbeenisabellahwang/Desktop/eyecan-room/apps/api
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
@@ -161,10 +167,12 @@ pnpm dev
 1. API 서버를 먼저 실행합니다.
 2. 웹앱 개발 서버를 실행합니다.
 3. Chrome 또는 Edge에서 `http://localhost:5173`에 접속합니다.
-4. `시작하기`를 눌러 내장 카메라 기반 사용자 눈동자 인식을 진행합니다.
+4. `시작하기`를 누르고 정면을 바라보며 자동 기준점 준비를 완료합니다. 수동 5방향 캘리브레이션은 없습니다.
 5. 외장 카메라 연결 단계에서 카메라를 연결합니다.
 6. ROOM 화면 우측 상단의 `Arduino 연결` 버튼을 누르고 브라우저 포트 선택 창에서 Arduino 포트를 선택합니다.
-7. 시선 방향과 길게 눈감기 선택으로 로테이션 UI를 띄우고 명령을 선택합니다.
+7. 설정에서 카메라를 각 기기로 향하게 한 뒤 커튼·조명·선풍기 위치를 등록합니다.
+8. 시선으로 카메라를 움직이고 현재 대상이 표시되면 길게 눈감아 해당 기기의 명령 UI를 엽니다.
+9. 원하는 명령이 선택 위치에 오면 다시 길게 눈감습니다.
 
 ### 9. 공통 설정
 
