@@ -95,7 +95,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible { 
 .gaze-detection-status.ok { border-color:rgba(18,96,74,.2); background:#e9f7f1; }
 .gaze-detection-status.ok strong { color:var(--green); }
 .room-fullscreen { position:relative; width:100vw; height:100vh; overflow:hidden; background:#101713; }
-.room-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#101713; }
+.room-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#101713; transform:rotate(180deg); }
 .room-empty-feed { position:absolute; inset:0; background:#050605; overflow:hidden; }
 .room-empty-feed::before { content:''; position:absolute; inset:0; background:linear-gradient(180deg,rgba(255,255,255,.035),transparent 18%,transparent 82%,rgba(255,255,255,.025)); pointer-events:none; }
 .mini-brand { position:absolute; z-index:16; top:18px; left:18px; display:flex; align-items:center; gap:9px; padding:8px 11px; border:1px solid rgba(255,255,255,.4); border-radius:999px; background:rgba(248,250,247,.82); backdrop-filter:blur(16px); color:#18352b; box-shadow:0 10px 28px rgba(0,0,0,.16); }
@@ -147,8 +147,21 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible { 
 .room-connection-card strong { display:block; font-size:20px; }
 .room-connection-card p { margin:9px auto 0; color:var(--muted); font-size:13px; line-height:1.6; max-width:290px; }
 .gaze-pill { position:absolute; top:22px; left:24px; background:rgba(20,10,10,.78); backdrop-filter:blur(10px); color:white; padding:9px 13px; border-radius:12px; font-size:12px; font-weight:600; }.gaze-pill span { color:#ff4040; font-size:9px; margin-right:4px; }
-.gaze-cursor { position:absolute; z-index:26; left:var(--gaze-x); top:var(--gaze-y); width:46px; height:46px; transform:translate(-50%,-50%); border:2px solid rgba(255,255,255,.82); border-radius:50%; background:rgba(255,38,38,.14); box-shadow:0 0 0 8px rgba(255,38,38,.12),0 0 30px rgba(255,38,38,.55); transition:left .12s linear,top .12s linear; pointer-events:none; }
-.gaze-cursor i { position:absolute; left:50%; top:50%; width:14px; height:14px; transform:translate(-50%,-50%); border-radius:50%; background:#ff2525; box-shadow:0 0 0 5px rgba(255,37,37,.24),0 0 18px rgba(255,37,37,.95); }
+.gaze-joystick { position:absolute; z-index:6; left:50%; top:50%; width:63.1579vmin; aspect-ratio:1; transform:translate(-50%,-50%); pointer-events:none; }
+.gaze-joystick svg { display:block; width:100%; height:100%; overflow:visible; }
+.joystick-field { fill:rgba(3,12,9,.18); stroke:rgba(255,255,255,.4); stroke-width:1.5; }
+.joystick-deadzone { fill:none; stroke:rgba(255,255,255,.42); stroke-width:1.2; stroke-dasharray:3 4; }
+.joystick-vector { stroke:rgba(255,255,255,.9); stroke-width:2; }
+.joystick-knob { fill:#ef2b2d; stroke:#fff; stroke-width:2; filter:drop-shadow(0 0 8px rgba(239,43,45,.95)); }
+.joystick-cross { stroke:#fff; stroke-width:3; stroke-linecap:round; filter:drop-shadow(0 1px 2px rgba(0,0,0,.95)); }
+.gaze-joystick.is-calibrating .joystick-cross { stroke:#facc15; }
+.gaze-joystick small { position:absolute; left:50%; top:calc(50% + 30px); transform:translateX(-50%); white-space:nowrap; color:#facc15; font-size:12px; font-weight:800; text-shadow:0 1px 4px #000; }
+.gaze-joystick-compact { position:relative; left:auto; top:auto; width:180px; max-width:56vw; margin:0 auto; transform:none; }
+.gaze-joystick-compact .joystick-field { fill:rgba(15,118,110,.035); stroke:rgba(15,118,110,.25); }
+.gaze-joystick-compact .joystick-deadzone { stroke:rgba(15,118,110,.35); }
+.gaze-joystick-compact .joystick-vector { stroke:#0f766e; }
+.gaze-joystick-compact .joystick-cross { stroke:#0f766e; filter:none; }
+.gaze-joystick-compact small { color:#8a6500; text-shadow:none; }
 .object-lock { position:absolute; top:22px; right:24px; display:flex; align-items:center; gap:10px; padding:9px 13px; border:1px solid rgba(255,255,255,.5); border-radius:14px; background:rgba(247,249,245,.82); backdrop-filter:blur(14px); color:var(--ink); box-shadow:0 8px 24px rgba(22,51,40,.12); }.object-lock>span { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; background:#dceee6; color:var(--green); font-size:17px; }.object-lock small,.object-lock strong { display:block; }.object-lock small { color:#82908a; font-size:8px; font-weight:700; letter-spacing:.08em; }.object-lock strong { margin-top:1px; font-size:12px; }
 .target-dock { position:absolute; left:50%; bottom:24px; transform:translateX(-50%); display:flex; gap:5px; padding:7px; border:1px solid rgba(255,255,255,.5); border-radius:18px; background:rgba(246,248,244,.76); backdrop-filter:blur(18px); box-shadow:0 14px 45px rgba(24,52,42,.17); }
 .target-dock button { min-width:83px; border:0; border-radius:12px; padding:9px 12px; background:transparent; color:#51605a; font-size:12px; font-weight:600; }.target-dock button span { display:block; font-size:18px; margin-bottom:2px; }.target-dock button.active { background:var(--green); color:white; box-shadow:0 5px 14px rgba(18,96,74,.25); }
@@ -179,7 +192,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible { 
 @media (max-width:1100px) { .radial-overlay { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; padding:3vh 3vw; }.radial-heading { padding:0; text-align:center; justify-self:center; }.radial-heading h1 { font-size:26px; margin:5px 0; }.radial-selector { width:min(48vh,440px); }.radial-current { grid-column:1; justify-self:center; }.radial-selector { --wheel-radius:clamp(130px,16vw,178px); } }
 @media (max-width:980px) { .main-view { grid-template-columns:minmax(0,1fr) 320px; }.eye-hero { grid-template-columns:1fr; align-content:center; }.eye-copy { text-align:center; }.eye-copy h1,.eye-copy p { margin-left:auto; margin-right:auto; }.side-panel { padding:14px; } }
 @media (max-width:760px) { .setup-copy h1,.setup-copy p,.setup-screen-compact .setup-copy h1,.setup-screen-compact .setup-copy p { white-space:normal; }.setup-screen-compact .setup-panel { width:100%; }.setup-screen-compact .gaze-guide-stage { aspect-ratio:16/10; } }
-@media (max-width:760px) { .app-header { height:64px; padding:0 16px; }.header-status { position:static; transform:none; margin-left:auto; margin-right:8px; font-size:0; }.header-status .status-dot { display:block; }.text-button { display:none; }.home-brand-mark { width:116px; height:82px; border-width:6px; }.home-brand-mark i { width:18px; height:18px; }.home-logo h1 { font-size:52px; }.setup-screen,.eye-onboarding { min-height:calc(100vh - 64px); padding:26px 18px; }.setup-actions,.recognition-actions,.onboarding-steps { grid-template-columns:1fr; }.setup-copy h1,.eye-copy h1 { font-size:38px; }.setup-panel { padding:18px; }.mini-brand { top:12px; left:12px; }.room-settings-button { top:12px; right:12px; width:42px; height:42px; }.arduino-panel { top:62px; right:12px; max-width:calc(100vw - 24px); }.arduino-panel small { max-width:150px; }.main-view { display:block; height:auto; overflow:visible; }.room-stage { height:62vh; min-height:470px; }.side-panel { border:0; padding:16px; overflow:visible; }.eye-camera-card,.readiness-card { padding:16px; }.target-dock { width:calc(100% - 24px); bottom:15px; }.target-dock button { flex:1; min-width:0; padding:8px 3px; }.gaze-cursor { width:42px; height:42px; }.object-lock { top:66px; right:12px; }.radial-overlay { padding:22px 12px 18px; }.radial-heading h1 { font-size:22px; }.radial-heading p { font-size:11px; }.radial-selector { --wheel-radius:125px; width:330px; max-width:100%; }.radial-command { width:92px; min-height:60px; margin:-30px 0 0 -46px; padding:8px 5px; }.radial-command strong { font-size:13px; }.radial-command.active { width:116px; min-height:72px; margin:-36px 0 0 -58px; }.radial-command.active strong { font-size:17px; }.radial-command.active span { display:none; }.radial-center { width:120px; height:120px; }.radial-timer { width:140px; height:140px; }.radial-current { padding:10px 12px; }.room-connection-card { padding:24px 18px; }.calibration-modal { padding:32px 20px; } }
+@media (max-width:760px) { .app-header { height:64px; padding:0 16px; }.header-status { position:static; transform:none; margin-left:auto; margin-right:8px; font-size:0; }.header-status .status-dot { display:block; }.text-button { display:none; }.home-brand-mark { width:116px; height:82px; border-width:6px; }.home-brand-mark i { width:18px; height:18px; }.home-logo h1 { font-size:52px; }.setup-screen,.eye-onboarding { min-height:calc(100vh - 64px); padding:26px 18px; }.setup-actions,.recognition-actions,.onboarding-steps { grid-template-columns:1fr; }.setup-copy h1,.eye-copy h1 { font-size:38px; }.setup-panel { padding:18px; }.mini-brand { top:12px; left:12px; }.room-settings-button { top:12px; right:12px; width:42px; height:42px; }.arduino-panel { top:62px; right:12px; max-width:calc(100vw - 24px); }.arduino-panel small { max-width:150px; }.main-view { display:block; height:auto; overflow:visible; }.room-stage { height:62vh; min-height:470px; }.side-panel { border:0; padding:16px; overflow:visible; }.eye-camera-card,.readiness-card { padding:16px; }.target-dock { width:calc(100% - 24px); bottom:15px; }.target-dock button { flex:1; min-width:0; padding:8px 3px; }.gaze-joystick { width:63.1579vmin; }.gaze-joystick-compact { width:150px; }.object-lock { top:66px; right:12px; }.radial-overlay { padding:22px 12px 18px; }.radial-heading h1 { font-size:22px; }.radial-heading p { font-size:11px; }.radial-selector { --wheel-radius:125px; width:330px; max-width:100%; }.radial-command { width:92px; min-height:60px; margin:-30px 0 0 -46px; padding:8px 5px; }.radial-command strong { font-size:13px; }.radial-command.active { width:116px; min-height:72px; margin:-36px 0 0 -58px; }.radial-command.active strong { font-size:17px; }.radial-command.active span { display:none; }.radial-center { width:120px; height:120px; }.radial-timer { width:140px; height:140px; }.radial-current { padding:10px 12px; }.room-connection-card { padding:24px 18px; }.calibration-modal { padding:32px 20px; } }
 .radial-overlay { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:0; background:transparent; backdrop-filter:none; pointer-events:none; }
 .radial-heading { display:none; }
 .radial-selector { justify-self:auto; width:clamp(390px,36vw,500px); pointer-events:auto; filter:drop-shadow(0 24px 52px rgba(0,0,0,.35)); }
@@ -225,14 +238,11 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible { 
 .eye-status-icon i { width:13px; height:13px; border-radius:50%; background:#0f766e; }
 .room-fullscreen { width:100%; background:#121619; }
 body:has(.room-fullscreen) { overflow:hidden; }
-.room-settings-button,.arduino-panel,.current-angle-target,.gaze-pill,.angle-demo-controls { border-radius:8px; }
+.room-settings-button,.arduino-panel,.current-angle-target,.gaze-pill { border-radius:8px; }
 .current-angle-target { position:absolute; z-index:20; top:22px; left:50%; transform:translateX(-50%); min-width:150px; padding:9px 16px; text-align:center; color:#182226; background:rgba(255,255,255,.9); border:1px solid rgba(216,225,229,.75); backdrop-filter:blur(12px); }
 .current-angle-target small,.current-angle-target strong { display:block; }
 .current-angle-target small { color:#52616b; font-size:9px; }
 .current-angle-target strong { margin-top:2px; font-size:14px; }
-.angle-demo-controls { position:absolute; z-index:25; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:6px; padding:7px; background:rgba(18,22,25,.78); backdrop-filter:blur(12px); }
-.angle-demo-controls button { min-height:38px; border:1px solid rgba(255,255,255,.16); border-radius:6px; padding:0 12px; color:#f3f6f7; background:rgba(255,255,255,.08); font-size:11px; }
-.angle-demo-controls .demo-blink-button { color:#062c28; background:#73dfc2; border-color:#73dfc2; font-weight:800; }
 .radial-command,.radial-current { border-radius:8px; }
 .radial-center { background:#123d38; }
 .emergency-alert { position:fixed; inset:0; z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:28px; text-align:center; color:#fff; background:rgba(127,29,29,.96); }
@@ -247,6 +257,4 @@ body:has(.room-fullscreen) { overflow:hidden; }
 .theme-dark .home-logo p,.theme-dark .setup-copy p,.theme-dark .setup-status-panel>p { color:#b3bec4; }
 @media (max-width:760px) {
   .current-angle-target { top:66px; }
-  .angle-demo-controls { width:calc(100% - 24px); overflow-x:auto; justify-content:flex-start; }
-  .angle-demo-controls button { flex:0 0 auto; }
 }

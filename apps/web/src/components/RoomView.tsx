@@ -1,12 +1,12 @@
-import type { CSSProperties, ReactNode, RefCallback } from 'react';
+import type { ReactNode, RefCallback } from 'react';
 import { arduinoStatusText, directionLabel } from '../domain/control';
 import type { AppState } from '../store/useAppStore';
-import type { FullGazeDirection, ScanTarget } from '../types/control';
+import type { FullGazeDirection } from '../types/control';
 import { targetMeta } from '../domain/control';
+import { GazeJoystick } from './GazeJoystick';
 
 type RoomViewProps = {
   children: ReactNode;
-  gazeCursor: { x: string; y: string };
   roomCameraReady: boolean;
   roomVideoRef: RefCallback<HTMLVideoElement>;
   store: AppState;
@@ -14,22 +14,17 @@ type RoomViewProps = {
   onConnectArduino: () => void;
   onDisconnectArduino: () => void;
   onOpenSettings: () => void;
-  onMockTarget: (target: ScanTarget) => void;
-  onDemoSelect: () => void;
 };
 
 export function RoomView({
   children,
-  gazeCursor,
   roomCameraReady,
   roomVideoRef,
   store,
   visibleGazeDirection,
   onConnectArduino,
   onDisconnectArduino,
-  onOpenSettings,
-  onMockTarget,
-  onDemoSelect
+  onOpenSettings
 }: RoomViewProps) {
   return (
     <section className="room-fullscreen" id="main-view">
@@ -57,6 +52,7 @@ export function RoomView({
               조명 {store.arduinoLevels.light} · 선풍기 {store.arduinoLevels.fan} · Pan {store.arduinoLevels.pan}° · Tilt {store.arduinoLevels.tilt}°
             </small>
           )}
+          {store.arduinoStatus === 'CONNECTED' && <small>{store.motionProtocolReady ? '연속 팬틸트 준비됨' : 'Arduino 펌웨어 업데이트 필요'} · 모터 방향 {store.motorSetupComplete ? '점검 완료' : '기본 방향 사용 중'}</small>}
           {store.arduinoLog.length > 0 && (
             <small>{store.arduinoLog[store.arduinoLog.length - 1]}</small>
           )}
@@ -73,13 +69,13 @@ export function RoomView({
       <div className={`gaze-pill gaze-${visibleGazeDirection.toLowerCase()}`}>
         <span>●</span> 시선 · {directionLabel[visibleGazeDirection]}
       </div>
-      <div className="angle-demo-controls" aria-label="개발용 카메라 각도 테스트">
-        <button type="button" onClick={() => onMockTarget('CURTAIN')}>왼쪽 · 커튼</button>
-        <button type="button" onClick={() => onMockTarget('LIGHT')}>위 · 조명</button>
-        <button type="button" onClick={() => onMockTarget('FAN')}>오른쪽 · 선풍기</button>
-        <button className="demo-blink-button" type="button" onClick={onDemoSelect}>길게 눈감아 선택</button>
-      </div>
-      <div className="gaze-cursor" style={{ '--gaze-x': gazeCursor.x, '--gaze-y': gazeCursor.y } as CSSProperties} aria-hidden="true"><i /></div>
+      {store.interactionMode === 'EXPLORE' && !store.emergencyActive && <GazeJoystick
+        errorX={store.gazeError.x}
+        errorY={store.gazeError.y}
+        deadzone={store.gazeDeadzone}
+        calibrationActive={store.calibrationActive}
+        showMotion={store.faceDetected && store.gazeReady && !store.isBlinking && !store.saccadeBraking && !store.calibrationActive}
+      />}
 
       {children}
     </section>

@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import type {
   ArduinoLevels,
   ArduinoStatus,
-  DevicePositions,
   FullGazeDirection,
   InteractionMode,
   ScanTarget,
@@ -22,7 +21,7 @@ export type {
 } from '../types/control';
 
 const MAX_ARDUINO_LOG_LINES = 8;
-const initialArduinoLevels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 90, servo: 90 };
+const initialArduinoLevels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 20, servo: 90 };
 
 const storedScanInterval = Number(window.localStorage.getItem('eyecan.scanIntervalMs'));
 const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanInterval >= 1000 && storedScanInterval <= 5000
@@ -30,25 +29,10 @@ const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanI
   : 2000;
 const storedThemeMode = window.localStorage.getItem('eyecan.themeMode');
 const initialThemeMode: ThemeMode = storedThemeMode === 'dark' ? 'dark' : 'light';
-const storedPositions = window.localStorage.getItem('eyecan.devicePositions');
-const storedPositionTargets: ScanTarget[] = ['CURTAIN', 'LIGHT', 'FAN'];
-const initialDevicePositions: DevicePositions = (() => {
-  if (!storedPositions) return {};
-  try {
-    const parsed = JSON.parse(storedPositions) as Record<string, { pan?: unknown; tilt?: unknown }>;
-    return Object.fromEntries(
-      storedPositionTargets.flatMap((target) => {
-        const position = parsed[target];
-        return position && typeof position.pan === 'number' && typeof position.tilt === 'number'
-          ? [[target, { pan: position.pan, tilt: position.tilt }]]
-          : [];
-      })
-    ) as DevicePositions;
-  } catch {
-    return {};
-  }
-})();
-window.localStorage.setItem('eyecan.devicePositions', JSON.stringify(initialDevicePositions));
+const initialMotorPanSign: 1 | -1 = window.localStorage.getItem('eyecan.motorPanSign') === '-1' ? -1 : 1;
+const initialMotorTiltSign: 1 | -1 = window.localStorage.getItem('eyecan.motorTiltSign') === '-1' ? -1 : 1;
+const initialMotorSetupComplete = window.localStorage.getItem('eyecan.motorSetupComplete') === 'true';
+window.localStorage.removeItem('eyecan.devicePositions');
 
 export type AppState = {
   gazeDirection: FullGazeDirection;
@@ -65,6 +49,13 @@ export type AppState = {
   blinkSequence: number;
   lastGazePoint: { x: number; y: number };
   gazeOmega: { x: number; y: number };
+  gazeError: { x: number; y: number };
+  gazeDeadzone: number;
+  calibrationActive: boolean;
+  isBlinking: boolean;
+  saccadeBraking: boolean;
+  sampleSequence: number;
+  trackingSessionId: string;
   lastCommand: string;
   visionStatus: 'STOPPED' | 'STARTING' | 'RUNNING' | 'ERROR';
   visionError: string | null;
@@ -81,8 +72,11 @@ export type AppState = {
   arduinoLevels: ArduinoLevels;
   arduinoLog: string[];
   hasArduinoAngle: boolean;
-  devicePositions: DevicePositions;
   activeAngleTarget: ScanTarget | null;
+  motionProtocolReady: boolean;
+  motorPanSign: 1 | -1;
+  motorTiltSign: 1 | -1;
+  motorSetupComplete: boolean;
   setGazeDirection: (direction: FullGazeDirection) => void;
   setSelectedTarget: (target: ScanTarget) => void;
   setInteractionMode: (mode: InteractionMode) => void;
@@ -98,8 +92,11 @@ export type AppState = {
   setLastArduinoCommand: (value: string) => void;
   setArduinoLevels: (value: Partial<ArduinoLevels>) => void;
   pushArduinoLogLine: (line: string) => void;
-  registerDevicePosition: (target: ScanTarget, position?: { pan: number; tilt: number }) => void;
   setActiveAngleTarget: (target: ScanTarget | null) => void;
+  setMotionProtocolReady: (ready: boolean) => void;
+  setMotorPanSign: (sign: 1 | -1) => void;
+  setMotorTiltSign: (sign: 1 | -1) => void;
+  setMotorSetupComplete: (complete: boolean) => void;
   syncFromServer: (payload: Partial<{
     gaze_direction: FullGazeDirection;
     selected_target: ScanTarget;
@@ -115,6 +112,14 @@ export type AppState = {
     last_gaze_point_y: number;
     gaze_omega_x: number;
     gaze_omega_y: number;
+    gaze_error_x: number;
+    gaze_error_y: number;
+    gaze_deadzone: number;
+    calibration_active: boolean;
+    is_blinking: boolean;
+    saccade_braking: boolean;
+    sample_sequence: number;
+    tracking_session_id: string;
     last_command: string;
     vision_status: AppState['visionStatus'];
     vision_error: string | null;
@@ -143,6 +148,13 @@ export const useAppStore = create<AppState>((set) => ({
   blinkSequence: 0,
   lastGazePoint: { x: 0.5, y: 0.5 },
   gazeOmega: { x: 0, y: 0 },
+  gazeError: { x: 0, y: 0 },
+  gazeDeadzone: 0.03,
+  calibrationActive: false,
+  isBlinking: false,
+  saccadeBraking: false,
+  sampleSequence: 0,
+  trackingSessionId: '',
   lastCommand: 'NONE',
   visionStatus: 'STOPPED',
   visionError: null,
@@ -159,8 +171,11 @@ export const useAppStore = create<AppState>((set) => ({
   arduinoLevels: initialArduinoLevels,
   arduinoLog: [],
   hasArduinoAngle: false,
-  devicePositions: initialDevicePositions,
   activeAngleTarget: null,
+  motionProtocolReady: false,
+  motorPanSign: initialMotorPanSign,
+  motorTiltSign: initialMotorTiltSign,
+  motorSetupComplete: initialMotorSetupComplete,
   setGazeDirection: (gazeDirection) => set({ gazeDirection }),
   setSelectedTarget: (selectedTarget) => set({ selectedTarget }),
   setInteractionMode: (interactionMode) => set({ interactionMode, scanStep: 0 }),
@@ -190,15 +205,22 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   pushArduinoLogLine: (line) =>
     set((state) => ({ arduinoLog: [...state.arduinoLog, line].slice(-MAX_ARDUINO_LOG_LINES) })),
-  registerDevicePosition: (target, position) => set((state) => {
-    const devicePositions = {
-      ...state.devicePositions,
-      [target]: position ?? { pan: state.arduinoLevels.pan, tilt: state.arduinoLevels.tilt }
-    };
-    window.localStorage.setItem('eyecan.devicePositions', JSON.stringify(devicePositions));
-    return { devicePositions };
-  }),
   setActiveAngleTarget: (activeAngleTarget) => set({ activeAngleTarget }),
+  setMotionProtocolReady: (motionProtocolReady) => set({ motionProtocolReady }),
+  setMotorPanSign: (motorPanSign) => {
+    window.localStorage.setItem('eyecan.motorPanSign', String(motorPanSign));
+    set({ motorPanSign, motorSetupComplete: false });
+    window.localStorage.setItem('eyecan.motorSetupComplete', 'false');
+  },
+  setMotorTiltSign: (motorTiltSign) => {
+    window.localStorage.setItem('eyecan.motorTiltSign', String(motorTiltSign));
+    set({ motorTiltSign, motorSetupComplete: false });
+    window.localStorage.setItem('eyecan.motorSetupComplete', 'false');
+  },
+  setMotorSetupComplete: (motorSetupComplete) => {
+    window.localStorage.setItem('eyecan.motorSetupComplete', String(motorSetupComplete));
+    set({ motorSetupComplete });
+  },
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;
@@ -236,7 +258,17 @@ export const useAppStore = create<AppState>((set) => ({
         gazeOmega: {
           x: payload.gaze_omega_x ?? state.gazeOmega.x,
           y: payload.gaze_omega_y ?? state.gazeOmega.y
-        }
+        },
+        gazeError: {
+          x: payload.gaze_error_x ?? state.gazeError.x,
+          y: payload.gaze_error_y ?? state.gazeError.y
+        },
+        gazeDeadzone: payload.gaze_deadzone ?? state.gazeDeadzone,
+        calibrationActive: payload.calibration_active ?? state.calibrationActive,
+        isBlinking: payload.is_blinking ?? state.isBlinking,
+        saccadeBraking: payload.saccade_braking ?? state.saccadeBraking,
+        sampleSequence: payload.sample_sequence ?? state.sampleSequence,
+        trackingSessionId: payload.tracking_session_id ?? state.trackingSessionId
       };
     })
 }));

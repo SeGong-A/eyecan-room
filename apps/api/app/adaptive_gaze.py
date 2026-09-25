@@ -24,6 +24,12 @@ class GazeOutput:
     ear: float
     omega_x: float
     omega_y: float
+    error_x: float
+    error_y: float
+    deadzone: float
+    calibration_active: bool
+    is_blinking: bool
+    saccade_braking: bool
     ready: bool
     learning_enabled: bool
     update_count: int
@@ -161,8 +167,36 @@ class AdaptiveGazeController:
 
     def reset(self) -> None:
         self.trainer.reset()
+        self.c.fill(0.0)
         self.initial_calib_done = False
+        self.d = self.base_d
+        self.kp = self.base_kp
+        self.u_filtered.fill(0.0)
         self.obs_buffer.clear()
+        self.prev_u.fill(0.0)
+        self.prev_v.fill(0.0)
+        self.prev_omega.fill(0.0)
+        self.zero_crossings = 0.0
+        self.last_time = time.time()
+
+    def handle_face_lost(self) -> None:
+        self.obs_buffer.clear()
+        self.prev_u = self.u_filtered.copy()
+        self.prev_v.fill(0.0)
+        self.prev_omega.fill(0.0)
+        self.zero_crossings = 0.0
+        self.last_time = time.time()
+
+    def recenter(self) -> None:
+        if not self.initial_calib_done:
+            return
+        self.c = self.u_filtered.copy()
+        self.obs_buffer.clear()
+        self.prev_u = self.u_filtered.copy()
+        self.prev_v.fill(0.0)
+        self.prev_omega.fill(0.0)
+        self.zero_crossings = 0.0
+        self.last_time = time.time()
 
     def get_iris_center(self, landmarks):
         np = self.np
@@ -183,7 +217,7 @@ class AdaptiveGazeController:
     def update(self, landmarks) -> GazeOutput:
         np = self.np
         now = time.time()
-        dt = max(1e-3, now - self.last_time)
+        dt = now - self.last_time
         self.last_time = now
         u_raw, ear = self.get_iris_center(landmarks)
         is_blinking = ear < 0.2
@@ -191,15 +225,22 @@ class AdaptiveGazeController:
             self.u_filtered = 0.6 * u_raw + 0.4 * self.u_filtered
         u = self.u_filtered.copy()
         v = u - self.prev_u
-        gaze_speed_y = abs(float(v[1])) / dt
+        gaze_speed_y = abs(float(v[1])) / (dt + 1e-6)
         if abs(v[0]) > 0.025 or abs(v[1]) > 0.025:
             self.zero_crossings = min(10.0, self.zero_crossings + 1.0) if (v[0] * self.prev_v[0] < 0 or v[1] * self.prev_v[1] < 0) else max(0.0, self.zero_crossings - 0.4)
             self.prev_v = v.copy()
         else:
             self.zero_crossings = max(0.0, self.zero_crossings - 0.5)
         self.prev_u = u.copy()
-        self.obs_buffer.append([float(u[0]), float(u[1])])
+        # Match the reference loop after initialization. Only the very first
+        # zero-point buffer excludes closed-eye frames so startup cannot snap
+        # to a blink; established sessions keep the original held-value input.
+        if self.initial_calib_done or not is_blinking:
+            self.obs_buffer.append([float(u[0]), float(u[1])])
         omega = np.zeros(2, dtype=np.float32)
+        x_err = np.zeros(2, dtype=np.float32)
+        calibration_active = False
+        saccade_braking = gaze_speed_y > 1.6
         if len(self.obs_buffer) == self.obs_buffer.maxlen:
             var = np.var(np.array(self.obs_buffer), axis=0)
             variance_sum = float(np.sum(var))
@@ -218,16 +259,17 @@ class AdaptiveGazeController:
             effective_rate = calib_rate * weight
             self.c = (1 - effective_rate) * self.c + effective_rate * u
             if variance_sum < var_threshold and weight > 0.25:
+                calibration_active = True
                 self.d = 0.15
             x_err = u - self.c
-            if not is_blinking and gaze_speed_y <= 1.6:
+            if not is_blinking and not saccade_braking:
                 for i in range(2):
                     if x_err[i] > self.d:
                         omega[i] = self.kp * (x_err[i] - self.d)
                     elif x_err[i] < -self.d:
                         omega[i] = self.kp * (x_err[i] + self.d)
                 omega = np.clip(omega, -1.5, 1.5)
-            if self.learning_enabled and not is_blinking and gaze_speed_y <= 1.6:
+            if self.learning_enabled and not is_blinking and not saccade_braking:
                 reward = -2.0 * float(np.sum((omega - self.prev_omega) ** 2))
                 if self.zero_crossings > 4.0:
                     reward -= 5.0 * float(np.sum(np.abs(omega)))
@@ -239,11 +281,17 @@ class AdaptiveGazeController:
                 self.trainer.store(obs, action, reward, value, log_prob)
         self.prev_omega = omega.copy()
         return GazeOutput(
-            point_x=max(0.0, min(1.0, 0.5 + float(omega[0]) * 0.32)),
-            point_y=max(0.0, min(1.0, 0.5 + float(omega[1]) * 0.32)),
+            point_x=max(0.0, min(1.0, 0.5 + float(x_err[0]) / 0.3)),
+            point_y=max(0.0, min(1.0, 0.5 + float(x_err[1]) / 0.3)),
             ear=ear,
             omega_x=float(omega[0]),
             omega_y=float(omega[1]),
+            error_x=float(x_err[0]),
+            error_y=float(x_err[1]),
+            deadzone=float(self.d),
+            calibration_active=calibration_active,
+            is_blinking=is_blinking,
+            saccade_braking=saccade_braking,
             ready=self.initial_calib_done,
             learning_enabled=self.learning_enabled,
             update_count=self.trainer.update_count,

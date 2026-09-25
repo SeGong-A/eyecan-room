@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import {
   commandToArduinoSequence,
   connectArduino,
+  connectGrantedArduino,
   disconnectArduino,
   getArduinoLevels,
   isArduinoConnected,
@@ -29,14 +30,31 @@ export function useArduinoController(store: AppState, setToast: (message: string
         setArduinoLevels(event.levels);
         return;
       }
+      if (event.type === 'motion-protocol') {
+        store.setMotionProtocolReady(event.ready);
+        setArduinoError(event.error ?? null);
+        return;
+      }
       if (event.type === 'disconnected') {
         setArduinoStatus('DISCONNECTED');
+        store.setMotionProtocolReady(false);
         setArduinoError(event.reason);
         setToast(event.reason);
       }
     });
     return unsubscribe;
   }, [pushArduinoLogLine, setArduinoLevels, setArduinoStatus, setArduinoError, setToast]);
+
+  useEffect(() => {
+    const releaseSerialPort = () => {
+      if (isArduinoConnected()) void disconnectArduino();
+    };
+    window.addEventListener('pagehide', releaseSerialPort);
+    return () => {
+      window.removeEventListener('pagehide', releaseSerialPort);
+      releaseSerialPort();
+    };
+  }, []);
 
   async function sendArduinoCommand(command: string): Promise<ArduinoWriteResult> {
     if (!commandToArduinoSequence(command)) {
@@ -87,6 +105,7 @@ export function useArduinoController(store: AppState, setToast: (message: string
 
     try {
       setArduinoStatus('CONNECTING');
+      store.setMotionProtocolReady(false);
       setArduinoError(null);
       await connectArduino();
       setArduinoStatus('CONNECTED');
@@ -101,13 +120,47 @@ export function useArduinoController(store: AppState, setToast: (message: string
     }
   }
 
+  async function autoConnectGrantedArduino() {
+    if (!isArduinoSerialSupported() || isArduinoConnected()) {
+      if (isArduinoConnected()) {
+        setArduinoStatus('CONNECTED');
+        setArduinoLevels(getArduinoLevels());
+      }
+      return isArduinoConnected();
+    }
+
+    try {
+      setArduinoStatus('CONNECTING');
+      store.setMotionProtocolReady(false);
+      setArduinoError(null);
+      const connected = await connectGrantedArduino();
+      if (!connected) {
+        setArduinoStatus('DISCONNECTED');
+        setArduinoError('최초 1회는 Arduino 연결 버튼에서 포트를 선택해주세요');
+        return false;
+      }
+      setArduinoStatus('CONNECTED');
+      setArduinoLevels(getArduinoLevels());
+      setToast('Arduino가 자동으로 연결되었습니다');
+      return true;
+    } catch (error) {
+      await disconnectArduino();
+      setArduinoStatus('ERROR');
+      const message = error instanceof Error ? error.message : 'Arduino 자동 연결에 실패했습니다';
+      setArduinoError(message);
+      setToast(message);
+      return false;
+    }
+  }
+
   async function disconnectArduinoFromUi() {
     await disconnectArduino();
+    store.setMotionProtocolReady(false);
     setArduinoStatus(isArduinoSerialSupported() ? 'DISCONNECTED' : 'UNSUPPORTED');
     setArduinoError(null);
     setArduinoLevels(getArduinoLevels());
     setToast('Arduino 연결을 해제했습니다');
   }
 
-  return { sendArduinoCommand, connectArduinoFromUi, disconnectArduinoFromUi };
+  return { sendArduinoCommand, connectArduinoFromUi, autoConnectGrantedArduino, disconnectArduinoFromUi };
 }

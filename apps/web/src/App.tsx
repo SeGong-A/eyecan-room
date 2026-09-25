@@ -4,53 +4,61 @@ import { HomeScreen } from './components/HomeScreen';
 import { RadialControl } from './components/RadialControl';
 import { RoomView } from './components/RoomView';
 import { SetupFlow } from './components/SetupFlow';
-import { positionItems, scanItems, scanSpeedItems, settingsRootItems, targetMeta, themeItems } from './domain/control';
-import { useAngleTarget } from './hooks/useAngleTarget';
+import { motorItems, scanItems, scanSpeedItems, settingsRootItems, targetMeta, themeItems } from './domain/control';
+import { useCameraDirectionTarget } from './hooks/useCameraDirectionTarget';
 import { useArduinoController } from './hooks/useArduinoController';
 import { useCamera } from './hooks/useCamera';
 import { useGazePanTilt } from './hooks/useGazePanTilt';
 import { useRotationScanner } from './hooks/useRotationScanner';
+import { holdGazeMotion } from './lib/arduinoSerial';
 import { useAppStore } from './store/useAppStore';
-import type { CommandItem, CommandLogItem, ScanTarget, SetupStage } from './types/control';
-import { clamp } from './utils/gaze';
+import type { CommandItem, CommandLogItem, SetupStage } from './types/control';
 
 function App() {
   const store = useAppStore();
-  const eyeCamera = useCamera('user');
   const roomCamera = useCamera('environment');
   const [setupStage, setSetupStage] = useState<SetupStage>('HOME');
   const [toast, setToast] = useState('');
   const [commandLog, setCommandLog] = useState<CommandLogItem[]>([]);
-  const [demoAngles, setDemoAngles] = useState(false);
   const roomActive = setupStage === 'ROOM';
   const scanList = useMemo(() => {
     if (store.interactionMode === 'SETTINGS') return settingsRootItems;
     if (store.interactionMode === 'SETTINGS_SUBMENU') {
       if (store.settingsMenu === 'SCAN_SPEED') return scanSpeedItems;
-      if (store.settingsMenu === 'POSITIONS') return positionItems;
+      if (store.settingsMenu === 'MOTOR') return motorItems;
       return themeItems;
     }
     return scanItems[store.selectedTarget] ?? scanItems.FAN;
   }, [store.interactionMode, store.selectedTarget, store.settingsMenu]);
-  const { connectArduinoFromUi, disconnectArduinoFromUi, sendArduinoCommand } = useArduinoController(store, setToast);
+  const { connectArduinoFromUi, autoConnectGrantedArduino, disconnectArduinoFromUi, sendArduinoCommand } = useArduinoController(store, setToast);
   const { rotationStep, rotationStepRef } = useRotationScanner(store.interactionMode, store.isPaused || store.emergencyActive, store.scanIntervalMs, scanList.length);
   const targetSetter = store.setActiveAngleTarget;
 
-  useAngleTarget(
+  useCameraDirectionTarget(
     store.arduinoLevels.pan,
     store.arduinoLevels.tilt,
-    store.devicePositions,
-    roomActive && (store.arduinoStatus === 'CONNECTED' || demoAngles),
+    roomActive && store.arduinoStatus === 'CONNECTED' && store.motionProtocolReady && store.hasArduinoAngle,
     store.activeAngleTarget,
     targetSetter
   );
-  useGazePanTilt(
-    store.gazeOmega,
-    store.arduinoStatus,
-    store.isPaused || store.emergencyActive || store.interactionMode !== 'EXPLORE',
-    roomActive,
-    sendArduinoCommand
-  );
+  useGazePanTilt({
+    omega: store.gazeOmega,
+    sampleSequence: store.sampleSequence,
+    trackingSessionId: store.trackingSessionId,
+    faceDetected: store.faceDetected,
+    gazeReady: store.gazeReady,
+    calibrationActive: store.calibrationActive,
+    isBlinking: store.isBlinking,
+    saccadeBraking: store.saccadeBraking,
+    connectionState: store.connectionState,
+    arduinoStatus: store.arduinoStatus,
+    motionProtocolReady: store.motionProtocolReady,
+    panSign: store.motorPanSign,
+    tiltSign: store.motorTiltSign,
+    levels: store.arduinoLevels,
+    isPaused: store.isPaused || store.emergencyActive || store.interactionMode !== 'EXPLORE',
+    isActive: roomActive
+  });
 
   const lastBlinkRef = useRef(0);
   useEffect(() => { document.documentElement.dataset.theme = store.themeMode; }, [store.themeMode]);
@@ -61,21 +69,42 @@ function App() {
     }
   }, [roomCamera.status, setupStage]);
   useEffect(() => {
+    if (!roomActive) return;
+    void autoConnectGrantedArduino();
+  }, [roomActive]);
+  useEffect(() => {
+    let socket: WebSocket | null = null;
+    let retryId = 0;
+    let disposed = false;
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/state`);
-    socket.addEventListener('open', () => store.setConnectionState('STREAMING'));
-    socket.addEventListener('message', (event) => {
-      try { store.syncFromServer(JSON.parse(event.data)); }
-      catch { setToast('상태 데이터를 읽지 못했습니다'); }
-    });
-    socket.addEventListener('close', () => store.setConnectionState('DISCONNECTED'));
-    socket.addEventListener('error', () => store.setConnectionState('DISCONNECTED'));
-    return () => socket.close();
+    const connect = () => {
+      if (disposed) return;
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws/state`);
+      socket.addEventListener('open', () => store.setConnectionState('STREAMING'));
+      socket.addEventListener('message', (event) => {
+        try { store.syncFromServer(JSON.parse(event.data)); }
+        catch { setToast('상태 데이터를 읽지 못했습니다'); }
+      });
+      socket.addEventListener('close', () => {
+        store.setConnectionState('DISCONNECTED');
+        if (!disposed) retryId = window.setTimeout(connect, 1000);
+      });
+      socket.addEventListener('error', () => store.setConnectionState('DISCONNECTED'));
+    };
+    connect();
+    return () => {
+      disposed = true;
+      window.clearTimeout(retryId);
+      socket?.close();
+    };
   }, [store.setConnectionState, store.syncFromServer]);
   useEffect(() => {
     if (!store.blinkSequence || store.blinkSequence === lastBlinkRef.current || store.emergencyActive) return;
     lastBlinkRef.current = store.blinkSequence;
-    if (store.lastBlinkEvent === 'CANCEL') { void returnToExplore('방 화면으로 돌아갑니다'); return; }
+    if (store.lastBlinkEvent === 'CANCEL') {
+      if (store.interactionMode !== 'EXPLORE') void returnToExplore('방 화면으로 돌아갑니다');
+      return;
+    }
     if (store.lastBlinkEvent !== 'SELECT' || store.isPaused) return;
     void selectCurrentItem();
   }, [store.blinkSequence, store.emergencyActive]);
@@ -103,11 +132,19 @@ function App() {
   }
   async function openCurrentTarget() {
     const target = store.activeAngleTarget;
-    if (!target) { setToast('등록된 기기 위치가 아닙니다'); return; }
+    if (!target) { setToast('현재 카메라 방향에는 선택할 기기가 없습니다'); return; }
+    if (!await holdGazeMotion()) { setToast('카메라 정지 응답을 확인하지 못했습니다'); return; }
     store.setSelectedTarget(target);
     store.setInteractionMode('COMMAND');
     await request(`/state/target?target=${target}`);
     await request('/state/mode?mode=COMMAND');
+  }
+  async function openSettings() {
+    if (store.interactionMode !== 'EXPLORE') return;
+    if (store.arduinoStatus === 'CONNECTED' && store.motionProtocolReady) {
+      if (!await holdGazeMotion()) { setToast('카메라 정지 응답을 확인하지 못했습니다'); return; }
+    }
+    store.setInteractionMode('SETTINGS');
   }
   async function selectCurrentItem() {
     if (store.interactionMode === 'EXPLORE') { await openCurrentTarget(); return; }
@@ -123,11 +160,28 @@ function App() {
     if (item.command === 'BACK') { store.setSettingsMenu('ROOT'); store.setInteractionMode('SETTINGS'); return; }
     if (item.command === 'SETTINGS_SCAN_SPEED') { store.setSettingsMenu('SCAN_SPEED'); store.setInteractionMode('SETTINGS_SUBMENU'); return; }
     if (item.command === 'SETTINGS_THEME') { store.setSettingsMenu('THEME'); store.setInteractionMode('SETTINGS_SUBMENU'); return; }
-    if (item.command === 'SETTINGS_POSITIONS') { store.setSettingsMenu('POSITIONS'); store.setInteractionMode('SETTINGS_SUBMENU'); return; }
-    if (item.command.startsWith('POSITION_')) {
-      const target = item.command.replace('POSITION_', '') as ScanTarget;
-      store.registerDevicePosition(target);
-      await returnToExplore(`${targetMeta[target].name} 위치를 Pan ${store.arduinoLevels.pan}°, Tilt ${store.arduinoLevels.tilt}°로 저장했습니다`);
+    if (item.command === 'SETTINGS_MOTOR') { store.setSettingsMenu('MOTOR'); store.setInteractionMode('SETTINGS_SUBMENU'); return; }
+    if (item.command.startsWith('MOTOR_')) {
+      if (item.command === 'MOTOR_FLIP_PAN') {
+        store.setMotorPanSign(store.motorPanSign === 1 ? -1 : 1);
+        setToast('시선의 좌우 모터 방향을 반전했습니다');
+        return;
+      }
+      if (item.command === 'MOTOR_FLIP_TILT') {
+        store.setMotorTiltSign(store.motorTiltSign === 1 ? -1 : 1);
+        setToast('시선의 상하 모터 방향을 반전했습니다');
+        return;
+      }
+      if (item.command === 'MOTOR_SETUP_DONE') {
+        store.setMotorSetupComplete(true);
+        await returnToExplore('모터 방향 점검을 완료했습니다');
+        return;
+      }
+      const testCommands: Record<string, string> = {
+        MOTOR_LEFT: 'CAM_LEFT:3', MOTOR_RIGHT: 'CAM_RIGHT:3', MOTOR_UP: 'CAM_DOWN:3', MOTOR_DOWN: 'CAM_UP:3'
+      };
+      const result = await sendArduinoCommand(testCommands[item.command]);
+      setToast(result.ok ? item.description : result.error ?? '모터 점검 명령에 실패했습니다');
       return;
     }
     if (item.command.startsWith('SCAN_SPEED_')) {
@@ -143,32 +197,23 @@ function App() {
     if (item.command === 'SETTINGS_SAVE_MODEL') { await request('/vision/model/save'); await returnToExplore('개인화 시선 모델 저장을 요청했습니다'); return; }
     if (item.command === 'SETTINGS_RESET_MODEL') { await request('/vision/model/reset'); await returnToExplore('시선 모델을 기본값으로 초기화합니다'); return; }
   }
-  function mockTarget(target: ScanTarget) {
-    const defaults: Record<ScanTarget, { pan: number; tilt: number }> = {
-      CURTAIN: { pan: 45, tilt: 20 }, LIGHT: { pan: 90, tilt: 55 }, FAN: { pan: 135, tilt: 20 }
-    };
-    setDemoAngles(true);
-    const position = store.devicePositions[target] ?? defaults[target];
-    if (!store.devicePositions[target]) store.registerDevicePosition(target, position);
-    store.setArduinoLevels(position);
-  }
-
   const activeStep = rotationStep % scanList.length;
   const currentItem = scanList[activeStep];
   const isSettings = store.interactionMode === 'SETTINGS' || store.interactionMode === 'SETTINGS_SUBMENU';
-  const radialTarget = isSettings ? { name: store.settingsMenu === 'POSITIONS' ? '기기 위치' : '설정', icon: '⚙' } : targetMeta[store.selectedTarget];
-  const point = { x: clamp(0.5 + (store.lastGazePoint.x - 0.5) * 2.4, 0.08, 0.92), y: clamp(0.5 + (store.lastGazePoint.y - 0.5) * 2.4, 0.1, 0.9) };
+  const radialTarget = isSettings ? { name: store.settingsMenu === 'MOTOR' ? '모터 방향' : '설정', icon: '⚙' } : targetMeta[store.selectedTarget];
 
   return <main className={`app theme-${store.themeMode}`}>
     {setupStage === 'HOME' && <HomeScreen onStart={() => setSetupStage('EYE_CAMERA')} />}
-    {setupStage !== 'HOME' && !roomActive && <SetupFlow eyeCamera={eyeCamera} roomCamera={roomCamera} setupStage={setupStage} store={store}
-      onStartVision={() => void request('/vision/start?camera_index=0')}
+    {setupStage !== 'HOME' && !roomActive && <SetupFlow roomCamera={roomCamera} setupStage={setupStage} store={store}
+      onStartVision={() => void request('/vision/start')}
       onContinue={() => setSetupStage('ROOM_CAMERA')}
-      onConnectRoomCamera={() => void roomCamera.connect()}
-      onEnterDemo={() => { setDemoAngles(true); setSetupStage('ROOM'); setToast('UI 데모 화면으로 이동합니다'); }} />}
-    {roomActive && <RoomView gazeCursor={{ x: `${point.x * 100}%`, y: `${point.y * 100}%` }} roomCameraReady={roomCamera.status === 'READY'} roomVideoRef={roomCamera.videoRef}
+      onConnectRoomCamera={() => {
+        void roomCamera.connect();
+        void connectArduinoFromUi();
+      }} />}
+    {roomActive && <RoomView roomCameraReady={roomCamera.status === 'READY'} roomVideoRef={roomCamera.videoRef}
       store={store} visibleGazeDirection={store.gazeDirection} onConnectArduino={() => void connectArduinoFromUi()} onDisconnectArduino={() => void disconnectArduinoFromUi()}
-      onOpenSettings={() => { if (store.interactionMode === 'EXPLORE') store.setInteractionMode('SETTINGS'); }} onMockTarget={mockTarget} onDemoSelect={() => void selectCurrentItem()}>
+      onOpenSettings={() => void openSettings()}>
       {store.interactionMode !== 'EXPLORE' && <RadialControl activeScanStep={activeStep} currentItem={currentItem} isSettingsMode={isSettings} isTargetChoice={false}
         radialRotation={-activeStep * (360 / scanList.length)} radialStepAngle={360 / scanList.length} radialTarget={radialTarget} scanIntervalMs={store.scanIntervalMs}
         scanList={scanList} onSelectCurrent={() => void selectCurrentItem()} />}
