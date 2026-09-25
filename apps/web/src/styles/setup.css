@@ -1,0 +1,37 @@
+.home-screen { display: grid; place-items: center; position: relative; min-height: 100dvh; padding: 48px 24px; }
+.home-content { display: flex; flex-direction: column; align-items: center; gap: 48px; }
+.home-content h1 { margin: 0; }
+.home-start { width: 256px; flex-direction: row-reverse; justify-content: space-between; padding-inline: 24px; }
+.app-header { height: 80px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 0 32px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.setup-screen { min-height: calc(100dvh - 80px); padding: 32px 24px 40px; display: flex; flex-direction: column; align-items: center; gap: 40px; }
+.setup-steps { display: flex; align-items: center; list-style: none; padding: 0; margin: 0; gap: 40px; }
+.setup-steps li { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; font-weight: 500; }
+.setup-steps li > span { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; font-size: 14px; }
+.setup-steps .is-current { color: var(--primary); font-weight: 650; }
+.setup-steps .is-current > span { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.setup-steps .is-complete > span { color: var(--primary); background: var(--subtle); }
+.setup-content { width: min(480px, 100%); margin-block: auto; display: flex; flex-direction: column; gap: 24px; }
+.setup-heading { text-align: center; }
+.setup-heading h1 { font-size: 32px; font-weight: 650; line-height: 1.35; margin-top: 12px; }
+.setup-gaze { padding-block: 4px; }
+.readiness-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.readiness-list li { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 12px 4px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.readiness-list li > span:not(.sr-only) { flex: 1; }
+.readiness-list .is-complete { color: var(--primary); }
+.readiness-list .is-active { color: var(--ink); font-weight: 600; }
+.setup-primary { width: 100%; }
+.setup-camera-symbol { align-self: center; display: grid; place-items: center; width: 144px; height: 144px; margin: 16px 0; color: var(--primary); }
+.camera-connection-row { display: flex; align-items: center; gap: 16px; padding: 20px 4px; border-block: 1px solid var(--border); }
+.camera-connection-row > div { flex: 1; }
+.camera-connection-row strong, .camera-connection-row span { display: block; }
+.camera-connection-row span { margin-top: 4px; color: var(--muted); font-size: 14px; }
+.camera-hidden-feed { display: none; }
+@media (max-width: 600px) {
+  .app-header { height: 72px; padding-inline: 20px; }
+  .app-header .status-badge { gap: 6px; }
+  .setup-screen { min-height: calc(100dvh - 72px); padding: 24px 24px 32px; gap: 32px; }
+  .setup-heading h1 { font-size: 28px; }
+  .setup-content { gap: 20px; }
+  .setup-steps { gap: 24px; }
+}
+@media (max-height: 740px) { .setup-screen { gap: 24px; } .setup-content { margin-block: 0; gap: 16px; } .setup-camera-symbol { margin-block: 0; height: 100px; } }

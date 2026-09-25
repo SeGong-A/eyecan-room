@@ -1,0 +1,49 @@
+@font-face {
+  font-family: Pretendard;
+  src: url('/fonts/PretendardVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  font-family: Pretendard, 'Apple SD Gothic Neo', system-ui, sans-serif;
+  font-synthesis: none;
+  color-scheme: light;
+  --background: #f7f9f8;
+  --surface: #ffffff;
+  --ink: #25332e;
+  --muted: #586860;
+  --primary: #176b5b;
+  --on-primary: #ffffff;
+  --primary-hover: #105847;
+  --subtle: #edf3f0;
+  --border: #d8e1dc;
+  --control-border: #7b8a82;
+  --warm: #f2ded0;
+  --error: #b42318;
+  --error-surface: #fff0ed;
+  --warning: #8a5715;
+  --gaze: #d92d20;
+  --shadow: 0 8px 28px rgb(25 43 34 / 10%);
+  --radius: 8px;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #171b1a;
+  --surface: #232a27;
+  --ink: #f2f6f3;
+  --muted: #b7c5bd;
+  --primary: #93d5be;
+  --on-primary: #172b23;
+  --primary-hover: #b0e3d0;
+  --subtle: #2e3833;
+  --border: #46554d;
+  --control-border: #83998d;
+  --warm: #876b58;
+  --error: #ffb4a9;
+  --error-surface: #472825;
+  --warning: #f0c485;
+  --shadow: 0 8px 28px rgb(0 0 0 / 20%);
+}

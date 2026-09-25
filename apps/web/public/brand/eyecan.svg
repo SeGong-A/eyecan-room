@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" color="#176B5B">
+  <style>@media (prefers-color-scheme:dark){:root{color:#93D5BE}}</style>
+  <symbol id="mark" viewBox="0 0 64 64">
+    <path d="M49 17C45 12 40 10 32 10H27C15 10 9 18 9 30V34C9 46 15 54 27 54H32C40 54 45 52 49 47" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+    <path d="M32 32H54" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+  </symbol>
+  <use href="#mark"/>
+</svg>

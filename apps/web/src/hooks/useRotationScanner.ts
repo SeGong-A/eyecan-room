@@ -1,20 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { InteractionMode } from '../types/control';
 
 export function useRotationScanner(
   interactionMode: InteractionMode,
   isPaused: boolean,
   scanIntervalMs: number,
-  scanListLength: number
+  scanListLength: number,
+  menuKey: string
 ) {
   const [rotationStep, setRotationStep] = useState(0);
   const rotationStepRef = useRef(0);
 
-  useEffect(() => {
-    rotationStepRef.current = rotationStep;
-  }, [rotationStep]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isPaused || interactionMode === 'EXPLORE') {
       rotationStepRef.current = 0;
       setRotationStep(0);
@@ -24,15 +21,13 @@ export function useRotationScanner(
     rotationStepRef.current = 0;
     setRotationStep(0);
     const timerId = window.setInterval(() => {
-      setRotationStep((step) => {
-        const nextStep = (step + 1) % scanListLength;
-        rotationStepRef.current = nextStep;
-        return nextStep;
-      });
+      // Keep full revolutions for the animation; selection uses modulo only.
+      rotationStepRef.current += 1;
+      setRotationStep(rotationStepRef.current);
     }, scanIntervalMs);
 
     return () => window.clearInterval(timerId);
-  }, [interactionMode, isPaused, scanIntervalMs, scanListLength]);
+  }, [interactionMode, isPaused, scanIntervalMs, scanListLength, menuKey]);
 
   return { rotationStep, rotationStepRef };
 }
