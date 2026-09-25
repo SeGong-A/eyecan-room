@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -10,8 +9,9 @@ import os
 import platform
 from threading import Event, Lock, Thread
 import time
+import uuid
 
-from .adaptive_gaze import AdaptiveGazeController as SharedAdaptiveGazeController
+from .adaptive_gaze import AdaptiveGazeController
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,14 @@ class GazeSample:
     ready: bool = False
     learning_enabled: bool = True
     learning_update_count: int = 0
+    error_x: float = 0.0
+    error_y: float = 0.0
+    deadzone: float = 0.03
+    calibration_active: bool = False
+    is_blinking: bool = False
+    saccade_braking: bool = False
+    sample_sequence: int = 0
+    tracking_session_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -32,10 +40,6 @@ class GazeModelPaths:
     task_path: str
     model_path: str
     personalized_model_path: str
-
-
-def _clip(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
 
 
 def resolve_gaze_model_paths() -> GazeModelPaths:
@@ -70,147 +74,65 @@ def get_face_landmarker_runtime_error() -> str | None:
     return None
 
 
-class _LegacyAdaptiveGazeController:
-    """Compatibility reference; the worker uses adaptive_gaze.AdaptiveGazeController."""
-    def __init__(self, model_path: str) -> None:
-        import numpy as np
+def _face_area(landmarks: list[object]) -> float:
+    xs = [landmark.x for landmark in landmarks]
+    ys = [landmark.y for landmark in landmarks]
+    return (max(xs) - min(xs)) * (max(ys) - min(ys))
 
-        self.np = np
-        self.model = self._load_model(model_path)
-        self.c = np.zeros(2, dtype=np.float32)
-        self.initial_calib_done = False
-        self.base_d = 0.03
-        self.base_kp = 1.0
-        self.d = self.base_d
-        self.kp = self.base_kp
-        self.alpha_ema = 0.6
-        self.u_filtered = np.zeros(2, dtype=np.float32)
-        self.obs_buffer: deque[list[float]] = deque(maxlen=15)
-        self.prev_u = np.zeros(2, dtype=np.float32)
-        self.prev_v = np.zeros(2, dtype=np.float32)
-        self.prev_omega = np.zeros(2, dtype=np.float32)
-        self.zero_crossings = 0.0
-        self.max_gaze_speed_y = 1.6
-        self.max_pointer_speed = 1.5
-        self.last_time = time.time()
 
-    def _load_model(self, model_path: str) -> object | None:
-        if not os.path.exists(model_path):
-            return None
+def _find_face_camera_index(
+    cv2,
+    mp,
+    landmarker,
+    max_index: int = 4,
+    warmup_frames: int = 10,
+    sample_frames: int = 15,
+    min_face_hits: int = 3,
+) -> int | None:
+    best_index = None
+    best_score = (0, 0.0)
+
+    for candidate_index in range(max_index + 1):
+        candidate = cv2.VideoCapture(candidate_index)
+        if not candidate.isOpened():
+            candidate.release()
+            continue
         try:
-            from stable_baselines3 import PPO
+            # UVC and FaceTime cameras often return dark or stale frames just
+            # after opening. Discard those frames before judging which camera
+            # is the user's gaze camera.
+            for _ in range(warmup_frames):
+                candidate.read()
 
-            return PPO.load(model_path)
-        except Exception:
-            return None
+            face_hits = 0
+            total_area = 0.0
+            for _ in range(sample_frames):
+                ok, frame = candidate.read()
+                if not ok or frame is None:
+                    continue
+                frame = cv2.flip(frame, 1)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+                result = landmarker.detect(mp_image)
+                if not result.face_landmarks:
+                    continue
+                area = _face_area(result.face_landmarks[0])
+                face_hits += 1
+                total_area += area
 
-    def get_iris_center(self, landmarks: list[object]):
-        np = self.np
+            # Detection persistence is more reliable than a single large
+            # false positive from the room camera. Area only breaks ties.
+            score = (face_hits, total_area / max(face_hits, 1))
+            if face_hits >= min_face_hits and score > best_score:
+                best_score = score
+                best_index = candidate_index
+        finally:
+            candidate.release()
 
-        p_l_inner = np.array([landmarks[133].x, landmarks[133].y])
-        p_l_outer = np.array([landmarks[33].x, landmarks[33].y])
-        p_l_iris = np.array([landmarks[468].x, landmarks[468].y])
-
-        p_r_inner = np.array([landmarks[362].x, landmarks[362].y])
-        p_r_outer = np.array([landmarks[263].x, landmarks[263].y])
-        p_r_iris = np.array([landmarks[473].x, landmarks[473].y])
-
-        l_width = np.linalg.norm(p_l_outer - p_l_inner) + 1e-6
-        r_width = np.linalg.norm(p_r_outer - p_r_inner) + 1e-6
-
-        l_ear = abs(landmarks[159].y - landmarks[145].y) / l_width
-        r_ear = abs(landmarks[386].y - landmarks[374].y) / r_width
-        ear = float((l_ear + r_ear) / 2.0)
-
-        l_dx = (p_l_iris[0] - (p_l_inner[0] + p_l_outer[0]) / 2) / l_width
-        l_dy = (p_l_iris[1] - (p_l_inner[1] + p_l_outer[1]) / 2) / l_width
-        r_dx = (p_r_iris[0] - (p_r_inner[0] + p_r_outer[0]) / 2) / r_width
-        r_dy = (p_r_iris[1] - (p_r_inner[1] + p_r_outer[1]) / 2) / r_width
-
-        return np.array([((l_dx + r_dx) / 2.0) * 4.5, ((l_dy + r_dy) / 2.0) * 9.0], dtype=np.float32), ear
-
-    def update(self, landmarks: list[object]) -> tuple[float, float, float, float, float]:
-        np = self.np
-
-        current_time = time.time()
-        dt = max(1e-3, current_time - self.last_time)
-        self.last_time = current_time
-
-        u_raw, ear = self.get_iris_center(landmarks)
-        is_blinking = ear < 0.2
-        if not is_blinking:
-            self.u_filtered = self.alpha_ema * u_raw + (1 - self.alpha_ema) * self.u_filtered
-        u = self.u_filtered.copy()
-        v = u - self.prev_u
-        gaze_speed_y = abs(float(v[1])) / dt
-
-        if abs(v[0]) > 0.025 or abs(v[1]) > 0.025:
-            if (v[0] * self.prev_v[0] < 0) or (v[1] * self.prev_v[1] < 0):
-                self.zero_crossings = min(10.0, self.zero_crossings + 1.0)
-            else:
-                self.zero_crossings = max(0.0, self.zero_crossings - 0.4)
-            self.prev_v = v.copy()
-        else:
-            self.zero_crossings = max(0.0, self.zero_crossings - 0.5)
-
-        self.prev_u = u.copy()
-        self.obs_buffer.append([float(u[0]), float(u[1])])
-
-        omega = np.zeros(2, dtype=np.float32)
-        if len(self.obs_buffer) == self.obs_buffer.maxlen:
-            buf_np = np.array(self.obs_buffer)
-            var = np.var(buf_np, axis=0)
-            variance_sum = float(np.sum(var))
-
-            if not self.initial_calib_done:
-                self.c = u.copy()
-                self.initial_calib_done = True
-
-            x_err_raw = u - self.c
-            obs = np.concatenate([x_err_raw, v, var, [float(self.zero_crossings)]]).astype(np.float32)
-            action = np.zeros(4, dtype=np.float32)
-            if self.model is not None:
-                try:
-                    action, _ = self.model.predict(obs, deterministic=True)
-                    action = np.asarray(action, dtype=np.float32)
-                except Exception:
-                    self.model = None
-                    action = np.zeros(4, dtype=np.float32)
-
-            self.d = float(np.clip(self.base_d + action[0] * 0.02, 0.02, 0.12))
-            self.kp = float(np.clip(self.base_kp + action[1] * 0.5, 0.7, 3.5))
-            calib_rate = float(np.clip(0.08 + action[2] * 0.04, 0.02, 0.15))
-            dynamic_var_thresh = float(np.clip(0.0007 + action[3] * 0.0002, 0.0001, 0.0011))
-
-            gaze_dist = float(np.hypot(x_err_raw[0], x_err_raw[1]))
-            att_weight = float(np.exp(-(gaze_dist**2) / (2 * (0.08**2))))
-            effective_calib_rate = calib_rate * att_weight
-
-            if (variance_sum < dynamic_var_thresh) and (att_weight > 0.25):
-                self.c = (1 - effective_calib_rate) * self.c + effective_calib_rate * u
-                self.d = 0.15
-            else:
-                self.c = (1 - effective_calib_rate) * self.c + effective_calib_rate * u
-
-            x_err = u - self.c
-            if not is_blinking and gaze_speed_y <= self.max_gaze_speed_y:
-                for i in range(2):
-                    if x_err[i] > self.d:
-                        omega[i] = self.kp * (x_err[i] - self.d)
-                    elif x_err[i] < -self.d:
-                        omega[i] = self.kp * (x_err[i] + self.d)
-                omega = np.clip(omega, -self.max_pointer_speed, self.max_pointer_speed)
-
-        self.prev_omega = omega.copy()
-        point_x = _clip(0.5 + float(omega[0]) * 0.32, 0.0, 1.0)
-        point_y = _clip(0.5 + float(omega[1]) * 0.32, 0.0, 1.0)
-        # omega는 조이스틱형 팬/틸트 속도 지령(P-제어기 출력)이다. point_x/point_y로
-        # 뭉개기 전의 원값을 그대로 같이 반환해 실제 카메라 구동(useGazePanTilt.ts)이
-        # 비례 제어에 쓸 수 있게 한다.
-        return point_x, point_y, ear, float(omega[0]), float(omega[1])
+    return best_index
 
 
-def _vision_worker(camera_index: int, sample_queue, command_queue) -> None:
+def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, command_queue) -> None:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp")
     try:
         import cv2
@@ -242,17 +164,28 @@ def _vision_worker(camera_index: int, sample_queue, command_queue) -> None:
             min_tracking_confidence=0.5,
         )
         landmarker = vision.FaceLandmarker.create_from_options(options)
-        controller = SharedAdaptiveGazeController(
+        controller = AdaptiveGazeController(
             base_model_path=model_paths.model_path,
             personalized_model_path=model_paths.personalized_model_path,
         )
 
-        cap = cv2.VideoCapture(camera_index)
+        selected_camera_index = camera_index
+        if camera_index < 0:
+            selected_camera_index = _find_face_camera_index(cv2, mp, landmarker)
+            if selected_camera_index is None:
+                sample_queue.put({
+                    "type": "error",
+                    "error": "얼굴이 보이는 카메라를 찾지 못했습니다. 내장 카메라 앞에서 다시 시도해주세요.",
+                })
+                return
+
+        cap = cv2.VideoCapture(selected_camera_index)
         if not cap.isOpened():
-            sample_queue.put({"type": "error", "error": f"Camera {camera_index} open failed"})
+            sample_queue.put({"type": "error", "error": f"Camera {selected_camera_index} open failed"})
             return
 
         sample_queue.put({"type": "status", "status": "RUNNING"})
+        sample_sequence = 0
         while True:
             try:
                 while True:
@@ -264,6 +197,8 @@ def _vision_worker(camera_index: int, sample_queue, command_queue) -> None:
                         controller.save()
                     elif action == "reset":
                         controller.reset()
+                    elif action == "recenter":
+                        controller.recenter()
                     elif action == "stop":
                         controller.save()
                         return
@@ -280,9 +215,18 @@ def _vision_worker(camera_index: int, sample_queue, command_queue) -> None:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             result = landmarker.detect(mp_image)
+            sample_sequence += 1
 
             if not result.face_landmarks:
-                sample_queue.put({"type": "sample", "sample": GazeSample(x=0.5, y=0.5, ear=0.0, face_detected=False, omega_x=0.0, omega_y=0.0)})
+                controller.handle_face_lost()
+                sample_queue.put({"type": "sample", "sample": GazeSample(
+                    x=0.5,
+                    y=0.5,
+                    ear=0.0,
+                    face_detected=False,
+                    sample_sequence=sample_sequence,
+                    tracking_session_id=tracking_session_id,
+                )})
                 time.sleep(0.03)
                 continue
 
@@ -297,6 +241,14 @@ def _vision_worker(camera_index: int, sample_queue, command_queue) -> None:
                 ready=output.ready,
                 learning_enabled=output.learning_enabled,
                 learning_update_count=output.update_count,
+                error_x=output.error_x,
+                error_y=output.error_y,
+                deadzone=output.deadzone,
+                calibration_active=output.calibration_active,
+                is_blinking=output.is_blinking,
+                saccade_braking=output.saccade_braking,
+                sample_sequence=sample_sequence,
+                tracking_session_id=tracking_session_id,
             )})
             time.sleep(0.03)
     except Exception as exc:
@@ -319,6 +271,7 @@ class VisionGazeTracker:
         self.error: str | None = None
         self._command_queue = None
         self.last_control_result: dict[str, object] | None = None
+        self.tracking_session_id = ""
 
     def start(self, camera_index: int, on_sample: Callable[[GazeSample], None]) -> None:
         with self._lock:
@@ -335,10 +288,15 @@ class VisionGazeTracker:
             self._stop_event.clear()
             self.status = "STARTING"
             self.error = None
+            self.tracking_session_id = uuid.uuid4().hex
             context = get_context("spawn")
             sample_queue = context.Queue()
             self._command_queue = context.Queue()
-            self._process = context.Process(target=_vision_worker, args=(camera_index, sample_queue, self._command_queue), daemon=True)
+            self._process = context.Process(
+                target=_vision_worker,
+                args=(camera_index, self.tracking_session_id, sample_queue, self._command_queue),
+                daemon=True,
+            )
             self._process.start()
             self._thread = Thread(target=self._monitor_worker, args=(sample_queue, on_sample), daemon=True)
             self._thread.start()

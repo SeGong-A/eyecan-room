@@ -28,6 +28,14 @@ class ControlState:
     last_gaze_point_y: float = 0.5
     gaze_omega_x: float = 0.0
     gaze_omega_y: float = 0.0
+    gaze_error_x: float = 0.0
+    gaze_error_y: float = 0.0
+    gaze_deadzone: float = 0.03
+    calibration_active: bool = False
+    is_blinking: bool = False
+    saccade_braking: bool = False
+    sample_sequence: int = 0
+    tracking_session_id: str = ""
     last_command: str = "NONE"
     vision_status: str = "STOPPED"
     vision_error: str | None = None
@@ -200,6 +208,14 @@ def receive_vision_sample(sample: GazeSample) -> None:
     # 무관하게 그대로 반영하면 "얼굴 인식 실패 시 팬틸트 정지"까지 자연히 해결된다.
     state.gaze_omega_x = sample.omega_x
     state.gaze_omega_y = sample.omega_y
+    state.gaze_error_x = sample.error_x
+    state.gaze_error_y = sample.error_y
+    state.gaze_deadzone = sample.deadzone
+    state.calibration_active = sample.calibration_active
+    state.is_blinking = sample.is_blinking
+    state.saccade_braking = sample.saccade_braking
+    state.sample_sequence = sample.sample_sequence
+    state.tracking_session_id = sample.tracking_session_id
 
     now_ms = int(time.time() * 1000)
     if not sample.face_detected:
@@ -207,7 +223,7 @@ def receive_vision_sample(sample: GazeSample) -> None:
         emergency_detector.reset()
         schedule_broadcast_state()
         return
-    blink_event = blink_machine.update(is_closed=sample.ear < 0.2, now_ms=now_ms)
+    blink_event = blink_machine.update(is_closed=sample.is_blinking, now_ms=now_ms)
     apply_blink_event(blink_event, now_ms)
 
     if sample.face_detected:
@@ -217,10 +233,16 @@ def receive_vision_sample(sample: GazeSample) -> None:
 
 
 @app.post("/vision/start")
-async def start_vision(camera_index: int = 0) -> dict[str, object]:
+async def start_vision(camera_index: int = -1) -> dict[str, object]:
     blink_machine.reset()
     emergency_detector.reset()
     vision_tracker.start(camera_index=camera_index, on_sample=receive_vision_sample)
+    state.gaze_error_x = 0.0
+    state.gaze_error_y = 0.0
+    state.gaze_omega_x = 0.0
+    state.gaze_omega_y = 0.0
+    state.sample_sequence = 0
+    state.tracking_session_id = vision_tracker.tracking_session_id
     state.vision_status = vision_tracker.status
     state.vision_error = vision_tracker.error
     await broadcast_state()
@@ -248,6 +270,18 @@ async def reset_vision_model() -> dict[str, object]:
     if not vision_tracker.send_control("reset"):
         raise HTTPException(status_code=409, detail="Vision tracker is not running")
     state.gaze_ready = False
+    await broadcast_state()
+    return state_payload()
+
+
+@app.post("/vision/recenter")
+async def recenter_vision() -> dict[str, object]:
+    if not vision_tracker.send_control("recenter"):
+        raise HTTPException(status_code=409, detail="Vision tracker is not running")
+    state.gaze_error_x = 0.0
+    state.gaze_error_y = 0.0
+    state.gaze_omega_x = 0.0
+    state.gaze_omega_y = 0.0
     await broadcast_state()
     return state_payload()
 

@@ -31,6 +31,7 @@ export type ArduinoEvent =
   | { type: 'line'; line: string }
   | { type: 'levels'; levels: Partial<ArduinoLevels> }
   | { type: 'rejected'; message: string }
+  | { type: 'motion-protocol'; ready: boolean; error?: string }
   | { type: 'disconnected'; reason: string };
 
 type ArduinoListener = (event: ArduinoEvent) => void;
@@ -38,6 +39,7 @@ type ArduinoListener = (event: ArduinoEvent) => void;
 const BAUD_RATE = 9600;
 const WRITE_DELAY_MS = 90;
 const ACK_WAIT_MS = 260;
+const MOTION_ACK_TIMEOUT_MS = 250;
 const MAX_RECENT_LINES = 40;
 
 let port: SerialPortLike | null = null;
@@ -47,12 +49,32 @@ let readLoop: Promise<void> | null = null;
 let writeChain: Promise<unknown> = Promise.resolve();
 let disconnectListenerAttached = false;
 let recentLines: string[] = [];
+let motionCommandId = 0;
+let motionProtocolReady = false;
+let pendingVelocity: { panDegPerSecond: number; tiltDegPerSecond: number } | null = null;
+let velocityPump: Promise<void> | null = null;
+let connectionPromise: Promise<void> | null = null;
+
+type MotionAck = { pan: number; tilt: number };
+const motionAckWaiters = new Map<number, {
+  resolve: (ack: MotionAck) => void;
+  reject: (error: Error) => void;
+  timeoutId: number;
+}>();
 
 const levels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 90, servo: 90 };
 const listeners = new Set<ArduinoListener>();
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForBoardStartup(timeoutMs = 3500) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (recentLines.some((line) => /^={20,}$/.test(line))) return;
+    await sleep(50);
+  }
 }
 
 function serial(): SerialLike | undefined {
@@ -69,6 +91,10 @@ export function getInitialArduinoStatus(): ArduinoStatus {
 
 export function isArduinoConnected() {
   return Boolean(port && writer);
+}
+
+export function isMotionProtocolReady() {
+  return motionProtocolReady;
 }
 
 export function getArduinoLevels(): ArduinoLevels {
@@ -117,6 +143,34 @@ function handleLine(line: string) {
     recentLines = recentLines.slice(-MAX_RECENT_LINES);
   }
   emit({ type: 'line', line });
+
+  const motionAck = line.match(/^A\s+(\d+)\s+(-?\d+)\s+(-?\d+)$/);
+  if (motionAck) {
+    const commandId = Number(motionAck[1]);
+    levels.pan = Number(motionAck[2]) / 10;
+    levels.tilt = Number(motionAck[3]) / 10;
+    emit({ type: 'levels', levels: { pan: levels.pan, tilt: levels.tilt } });
+    const waiter = motionAckWaiters.get(commandId);
+    if (waiter) {
+      window.clearTimeout(waiter.timeoutId);
+      motionAckWaiters.delete(commandId);
+      waiter.resolve({ pan: levels.pan, tilt: levels.tilt });
+    }
+    return;
+  }
+
+  const motionError = line.match(/^E\s+(\d+)\s+(.+)$/);
+  if (motionError) {
+    const commandId = Number(motionError[1]);
+    const waiter = motionAckWaiters.get(commandId);
+    if (waiter) {
+      window.clearTimeout(waiter.timeoutId);
+      motionAckWaiters.delete(commandId);
+      waiter.reject(new Error(`Arduino motion error: ${motionError[2]}`));
+    }
+    emit({ type: 'rejected', message: line });
+    return;
+  }
 
   const panTilt = line.match(/Pan:\s*(-?\d+)\s*Tilt:\s*(-?\d+)/);
   if (panTilt) {
@@ -229,13 +283,13 @@ function detachDisconnectListener() {
   disconnectListenerAttached = false;
 }
 
-function enqueueWrite(lines: string[]): Promise<void> {
+function enqueueWrite(lines: string[], delayMs = WRITE_DELAY_MS): Promise<void> {
   const run = async () => {
     if (!writer) throw new Error('Arduino가 연결되지 않았습니다');
     const encoder = new TextEncoder();
     for (const line of lines) {
       await writer.write(encoder.encode(`${line}\n`));
-      await sleep(WRITE_DELAY_MS);
+      if (delayMs > 0) await sleep(delayMs);
     }
   };
   const result = writeChain.then(run, run);
@@ -243,51 +297,167 @@ function enqueueWrite(lines: string[]): Promise<void> {
   return result;
 }
 
+function waitForMotionAck(commandId: number): Promise<MotionAck> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      motionAckWaiters.delete(commandId);
+      reject(new Error('Arduino motion ACK timeout'));
+    }, MOTION_ACK_TIMEOUT_MS);
+    motionAckWaiters.set(commandId, { resolve, reject, timeoutId });
+  });
+}
+
+async function sendMotionLine(lineFactory: (commandId: number) => string): Promise<MotionAck> {
+  if (!writer) throw new Error('Arduino가 연결되지 않았습니다');
+  const commandId = ++motionCommandId;
+  const ackPromise = waitForMotionAck(commandId);
+  try {
+    await enqueueWrite([lineFactory(commandId)], 0);
+    return await ackPromise;
+  } catch (error) {
+    const waiter = motionAckWaiters.get(commandId);
+    if (waiter) {
+      window.clearTimeout(waiter.timeoutId);
+      motionAckWaiters.delete(commandId);
+    }
+    // The promise may have rejected first; mark it handled before propagating.
+    void ackPromise.catch(() => {});
+    throw error;
+  }
+}
+
+export async function queryMotionState(): Promise<MotionAck> {
+  const ack = await sendMotionLine((commandId) => `Q ${commandId}`);
+  motionProtocolReady = true;
+  emit({ type: 'motion-protocol', ready: true });
+  return ack;
+}
+
+export function queueGazeVelocity(panDegPerSecond: number, tiltDegPerSecond: number) {
+  pendingVelocity = { panDegPerSecond, tiltDegPerSecond };
+  if (velocityPump) return;
+  velocityPump = (async () => {
+    while (pendingVelocity && writer && motionProtocolReady) {
+      const velocity = pendingVelocity;
+      pendingVelocity = null;
+      const pan10 = Math.round(Math.max(-30, Math.min(30, velocity.panDegPerSecond)) * 10);
+      const tilt10 = Math.round(Math.max(-30, Math.min(30, velocity.tiltDegPerSecond)) * 10);
+      try {
+        await sendMotionLine((commandId) => `V ${commandId} ${pan10} ${tilt10}`);
+      } catch (error) {
+        motionProtocolReady = false;
+        pendingVelocity = null;
+        emit({ type: 'motion-protocol', ready: false, error: error instanceof Error ? error.message : '속도 명령 오류' });
+      }
+    }
+  })().finally(() => {
+    velocityPump = null;
+    if (pendingVelocity && writer && motionProtocolReady) queueGazeVelocity(pendingVelocity.panDegPerSecond, pendingVelocity.tiltDegPerSecond);
+  });
+}
+
+export async function holdGazeMotion(): Promise<boolean> {
+  pendingVelocity = null;
+  if (!writer || !motionProtocolReady) return false;
+  try {
+    await sendMotionLine((commandId) => `H ${commandId}`);
+    return true;
+  } catch (error) {
+    motionProtocolReady = false;
+    emit({ type: 'motion-protocol', ready: false, error: error instanceof Error ? error.message : '정지 명령 오류' });
+    return false;
+  }
+}
+
+async function openArduinoPort(selected: SerialPortLike): Promise<void> {
+  if (isArduinoConnected()) return;
+  if (connectionPromise) return connectionPromise;
+
+  connectionPromise = (async () => {
+    try {
+      await selected.open({ baudRate: BAUD_RATE });
+    } catch (error) {
+      throw describeOpenError(error);
+    }
+
+    port = selected;
+    recentLines = [];
+
+    if (!port.writable) {
+      await disconnectArduino();
+      throw new Error('Arduino 쓰기 스트림을 열 수 없습니다');
+    }
+    writer = port.writable.getWriter();
+
+    startReadLoop();
+    attachDisconnectListener();
+
+    // Opening an Uno resets it. Its UTF-8 startup menu is long at 9600 baud,
+    // so begin the strict 250ms motion ACK window only after that menu ends.
+    await waitForBoardStartup();
+    try {
+      await queryMotionState();
+      await holdGazeMotion();
+    } catch {
+      motionProtocolReady = false;
+      emit({
+        type: 'motion-protocol',
+        ready: false,
+        error: '팬틸트 속도 프로토콜을 확인하지 못했습니다. 최신 Arduino 펌웨어를 업로드해주세요.'
+      });
+    }
+    await enqueueWrite(['m']);
+  })();
+
+  try {
+    await connectionPromise;
+  } finally {
+    connectionPromise = null;
+  }
+}
+
+export async function connectGrantedArduino(): Promise<boolean> {
+  const serialApi = serial();
+  if (!serialApi) return false;
+  if (isArduinoConnected()) return true;
+  if (connectionPromise) {
+    await connectionPromise;
+    return isArduinoConnected();
+  }
+
+  const granted = await serialApi.getPorts();
+  if (granted.length !== 1) return false;
+  await openArduinoPort(granted[0]);
+  return true;
+}
+
 export async function connectArduino(): Promise<void> {
   const serialApi = serial();
   if (!serialApi) {
     throw new Error('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
   }
+  if (isArduinoConnected()) return;
+  if (connectionPromise) return connectionPromise;
 
   let selected: SerialPortLike | null = null;
   try {
     const granted = await serialApi.getPorts();
     if (granted.length === 1) selected = granted[0];
   } catch {
-    /* getPorts unavailable — fall back to an explicit port pick */
+    /* getPorts unavailable - fall back to an explicit port pick */
   }
-  if (!selected) {
-    selected = await serialApi.requestPort();
-  }
-
-  try {
-    await selected.open({ baudRate: BAUD_RATE });
-  } catch (error) {
-    throw describeOpenError(error);
-  }
-
-  port = selected;
-  recentLines = [];
-
-  if (!port.writable) {
-    await disconnectArduino();
-    throw new Error('Arduino 쓰기 스트림을 열 수 없습니다');
-  }
-  writer = port.writable.getWriter();
-
-  startReadLoop();
-  attachDisconnectListener();
-
-  // Ask the sketch to reprint its menu so we can seed cached levels from the echo
-  // instead of assuming a freshly reset 0 / 0 / 90 state.
-  try {
-    await enqueueWrite(['m']);
-  } catch {
-    /* non-fatal: the connection is still usable without the initial echo */
-  }
+  if (!selected) selected = await serialApi.requestPort();
+  await openArduinoPort(selected);
 }
 
 export async function disconnectArduino(): Promise<void> {
+  pendingVelocity = null;
+  motionProtocolReady = false;
+  for (const waiter of motionAckWaiters.values()) {
+    window.clearTimeout(waiter.timeoutId);
+    waiter.reject(new Error('Arduino 연결이 종료되었습니다'));
+  }
+  motionAckWaiters.clear();
   detachDisconnectListener();
   await stopReadLoop();
 
@@ -363,8 +533,6 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
     const char = { LEFT: 'a', RIGHT: 'd', UP: 'w', DOWN: 's' }[direction as 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'];
     return { sequence: ['m', '1', degrees ? `${char} ${degrees}` : char] };
   }
-  if (command === 'CAM_STOP') return { sequence: ['m', '1', 'c'] };
-
   return null;
 }
 

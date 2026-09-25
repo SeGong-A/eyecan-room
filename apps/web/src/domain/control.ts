@@ -7,7 +7,7 @@ export const targetMeta: Record<ScanTarget, TargetMeta> = {
 };
 
 export const settingsRootItems: CommandItem[] = [
-  { label: '기기 위치', description: '현재 카메라 각도를 기기 위치로 등록합니다', command: 'SETTINGS_POSITIONS' },
+  { label: '모터 방향', description: '팬틸트 이동 방향을 점검합니다', command: 'SETTINGS_MOTOR' },
   { label: '로테이션 시간', description: '선택 항목이 넘어가는 속도를 설정합니다', command: 'SETTINGS_SCAN_SPEED' },
   { label: '화면 모드', description: '화면 테마를 선택합니다', command: 'SETTINGS_THEME' },
   { label: '학습 전환', description: '시선 온라인 학습을 켜거나 끕니다', command: 'SETTINGS_LEARNING' },
@@ -16,10 +16,14 @@ export const settingsRootItems: CommandItem[] = [
   { label: '닫기', description: '설정을 닫습니다', command: 'SETTINGS_CLOSE' }
 ];
 
-export const positionItems: CommandItem[] = [
-  { label: '왼쪽 · 커튼', description: '현재 각도를 커튼 위치로 저장합니다', command: 'POSITION_CURTAIN' },
-  { label: '위 · 조명', description: '현재 각도를 조명 위치로 저장합니다', command: 'POSITION_LIGHT' },
-  { label: '오른쪽 · 선풍기', description: '현재 각도를 선풍기 위치로 저장합니다', command: 'POSITION_FAN' },
+export const motorItems: CommandItem[] = [
+  { label: '왼쪽 3°', description: '카메라를 왼쪽으로 3도 움직입니다', command: 'MOTOR_LEFT' },
+  { label: '오른쪽 3°', description: '카메라를 오른쪽으로 3도 움직입니다', command: 'MOTOR_RIGHT' },
+  { label: '위 3°', description: '카메라를 위로 3도 움직입니다', command: 'MOTOR_UP' },
+  { label: '아래 3°', description: '카메라를 아래로 3도 움직입니다', command: 'MOTOR_DOWN' },
+  { label: '좌우 반전', description: '시선의 좌우 모터 방향을 반대로 설정합니다', command: 'MOTOR_FLIP_PAN' },
+  { label: '상하 반전', description: '시선의 상하 모터 방향을 반대로 설정합니다', command: 'MOTOR_FLIP_TILT' },
+  { label: '점검 완료', description: '현재 방향으로 자동 시선 이동을 활성화합니다', command: 'MOTOR_SETUP_DONE' },
   { label: '돌아가기', description: '설정으로 돌아갑니다', command: 'BACK' }
 ];
 

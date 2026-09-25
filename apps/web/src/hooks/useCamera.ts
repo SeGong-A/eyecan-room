@@ -8,6 +8,9 @@ type CameraDevice = {
   label: string;
 };
 
+const BUILT_IN_CAMERA_PATTERN = /facetime|built-in|continuity|iphone|아이폰/i;
+const EXTERNAL_CAMERA_STORAGE_KEY = 'eyecan.externalCameraDeviceId';
+
 function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
@@ -25,10 +28,10 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [error, setError] = useState<{ name: string; message: string } | null>(null);
 
-  const refreshDevices = useCallback(async () => {
+  const refreshDevices = useCallback(async (): Promise<CameraDevice[]> => {
     if (!navigator.mediaDevices?.enumerateDevices) {
       setDevices([]);
-      return;
+      return [];
     }
 
     const cameras = (await navigator.mediaDevices.enumerateDevices())
@@ -38,6 +41,7 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
         label: device.label || `Camera ${index + 1}`
       }));
     setDevices(cameras);
+    return cameras;
   }, []);
 
   const disconnect = useCallback(() => {
@@ -66,15 +70,37 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
     }
 
     try {
+      let targetDeviceId = deviceId;
+      if (!targetDeviceId && defaultFacingMode === 'environment') {
+        let cameras = await refreshDevices();
+        const labelsAreHidden = cameras.length === 0 || cameras.every((camera) => /^Camera \d+$/.test(camera.label));
+        if (labelsAreHidden) {
+          const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+          stopStream(permissionStream);
+          cameras = await refreshDevices();
+        }
+
+        const storedDeviceId = window.localStorage.getItem(EXTERNAL_CAMERA_STORAGE_KEY);
+        const externalCamera = cameras.find((camera) => camera.deviceId === storedDeviceId && !BUILT_IN_CAMERA_PATTERN.test(camera.label))
+          ?? cameras.find((camera) => !BUILT_IN_CAMERA_PATTERN.test(camera.label));
+        if (!externalCamera) {
+          throw new Error('USB 외장 카메라를 찾지 못했습니다. 카메라 연결 상태를 확인해주세요.');
+        }
+        targetDeviceId = externalCamera.deviceId;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: targetDeviceId
+          ? { deviceId: { exact: targetDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
           : { facingMode: defaultFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       streamRef.current = stream;
 
-      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? deviceId ?? '';
+      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? targetDeviceId ?? '';
+      if (defaultFacingMode === 'environment' && activeDeviceId) {
+        window.localStorage.setItem(EXTERNAL_CAMERA_STORAGE_KEY, activeDeviceId);
+      }
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         streamRef.current = null;
         setStatus('IDLE');
