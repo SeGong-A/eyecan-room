@@ -1,0 +1,46 @@
+.radial-overlay { position: absolute; z-index: 10; inset: 156px 24px 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; pointer-events: none; }
+.radial-area { --item-width: 120px; --item-height: 72px; position: relative; width: min(640px, 100%); flex: 1; min-height: 300px; max-height: 540px; overflow: clip; overflow-clip-margin: 4px; }
+.radial-orbit { position: absolute; top: 50%; left: 50%; width: calc(var(--wheel-radius) * 2); height: calc(var(--wheel-radius) * 2); transform: translate(-50%, -50%); border: 1px solid rgb(255 255 255 / 75%); border-radius: 50%; }
+.command-wheel { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform: rotate(var(--wheel-rotation)); transition: transform 240ms ease-in-out; }
+.radial-command { position: absolute; top: calc(50% + var(--item-y)); left: calc(50% + var(--item-x)); width: var(--item-width); height: var(--item-height); margin-left: calc(var(--item-width) / -2); margin-top: calc(var(--item-height) / -2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 8px; border: 2px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: center; transform: rotate(var(--counter-rotation)); transition: transform 240ms ease-in-out, background-color 160ms, color 160ms; }
+.radial-command strong { font-size: 16px; line-height: 1.2; font-weight: 600; word-break: keep-all; overflow-wrap: anywhere; }
+.radial-command.active { background: var(--primary); color: var(--on-primary); border-color: var(--on-primary); box-shadow: 0 0 0 3px var(--primary); }
+.radial-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 148px; height: 148px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; border-radius: 50%; background: var(--surface); color: var(--primary); text-align: center; padding: 12px; }
+.radial-center h2 { font-size: 20px; line-height: 1.2; color: var(--ink); font-weight: 650; }
+.radial-center > span { font-size: 14px; line-height: 1.2; color: var(--muted); }
+.radial-timer { position: absolute; top: 50%; left: 50%; width: 162px; height: 162px; transform: translate(-50%, -50%) rotate(-90deg); fill: none; stroke-width: 2; }
+.radial-timer circle { stroke: var(--border); }
+.radial-timer .timer-progress { stroke: var(--primary); stroke-linecap: round; stroke-dasharray: 352; animation: radial-progress linear forwards; }
+@keyframes radial-progress { from { stroke-dashoffset: 352; } to { stroke-dashoffset: 0; } }
+.radial-current { width: min(440px, 100%); flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 16px; min-height: 88px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); pointer-events: auto; }
+.current-command { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.current-command > svg { color: var(--primary); }
+.current-command span, .current-command strong { display: block; }
+.current-command span { color: var(--muted); font-size: 14px; }
+.current-command strong { font-size: 20px; line-height: 1.3; word-break: keep-all; }
+.radial-current .button { min-width: 112px; flex-shrink: 0; }
+@media (max-width: 600px), (max-height: 650px) {
+  .radial-area { --item-width: 88px; --item-height: 64px; min-height: 312px; }
+  .radial-command { padding: 4px; gap: 3px; }
+  .radial-command strong { font-size: 14px; }
+  .radial-command svg { width: 20px; height: 20px; }
+  .radial-center { width: 96px; height: 96px; gap: 3px; padding: 6px; }
+  .radial-center > svg { width: 20px; height: 20px; }
+  .radial-center h2 { font-size: 16px; line-height: 1.1; }
+  .radial-timer { width: 108px; height: 108px; }
+}
+@media (max-width: 600px) {
+  .radial-overlay { inset: 216px 16px 24px; gap: 12px; }
+  .radial-current { padding: 12px; gap: 12px; }
+  .radial-current .button { min-width: 96px; padding-inline: 12px; }
+  .current-command { gap: 8px; }
+  .current-command strong { font-size: 18px; }
+}
+@media (max-height: 650px) {
+  .room-fullscreen:has(.radial-overlay) { height: auto; min-height: 650px; }
+  .radial-overlay { top: 140px; bottom: 24px; }
+}
+@media (max-height: 650px) and (max-width: 600px) {
+  .room-fullscreen:has(.radial-overlay) { min-height: 740px; }
+  .radial-overlay { top: 216px; }
+}

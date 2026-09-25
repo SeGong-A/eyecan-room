@@ -12,8 +12,9 @@ import {
 } from '../lib/arduinoSerial';
 import type { ArduinoWriteResult } from '../lib/arduinoSerial';
 import type { AppState } from '../store/useAppStore';
+import type { Notify } from '../types/control';
 
-export function useArduinoController(store: AppState, setToast: (message: string) => void) {
+export function useArduinoController(store: AppState, setToast: Notify) {
   const { setArduinoStatus, setArduinoError, setArduinoLevels, pushArduinoLogLine } = store;
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function useArduinoController(store: AppState, setToast: (message: string
         setArduinoStatus('DISCONNECTED');
         store.setMotionProtocolReady(false);
         setArduinoError(event.reason);
-        setToast(event.reason);
+        setToast(event.reason, 'error');
       }
     });
     return unsubscribe;
@@ -99,7 +100,7 @@ export function useArduinoController(store: AppState, setToast: (message: string
     if (!isArduinoSerialSupported()) {
       setArduinoStatus('UNSUPPORTED');
       setArduinoError('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
-      setToast('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다');
+      setToast('Chrome 또는 Edge에서 Arduino 연결을 사용할 수 있습니다', 'error');
       return;
     }
 
@@ -110,13 +111,13 @@ export function useArduinoController(store: AppState, setToast: (message: string
       await connectArduino();
       setArduinoStatus('CONNECTED');
       setArduinoLevels(getArduinoLevels());
-      setToast('Arduino가 연결되었습니다');
+      setToast('Arduino가 연결되었습니다', 'success');
     } catch (error) {
       await disconnectArduino();
       setArduinoStatus('ERROR');
       const message = error instanceof Error ? error.message : 'Arduino 연결에 실패했습니다';
       setArduinoError(message);
-      setToast(message);
+      setToast(message, 'error');
     }
   }
 
@@ -141,14 +142,14 @@ export function useArduinoController(store: AppState, setToast: (message: string
       }
       setArduinoStatus('CONNECTED');
       setArduinoLevels(getArduinoLevels());
-      setToast('Arduino가 자동으로 연결되었습니다');
+      setToast('Arduino가 자동으로 연결되었습니다', 'success');
       return true;
     } catch (error) {
       await disconnectArduino();
       setArduinoStatus('ERROR');
       const message = error instanceof Error ? error.message : 'Arduino 자동 연결에 실패했습니다';
       setArduinoError(message);
-      setToast(message);
+      setToast(message, 'error');
       return false;
     }
   }

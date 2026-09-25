@@ -236,7 +236,9 @@ export const useAppStore = create<AppState>((set) => ({
         interactionMode,
         isCalibrated: payload.is_calibrated ?? state.isCalibrated,
         isPaused: payload.is_paused ?? state.isPaused,
-        scanIntervalMs: payload.scan_interval_ms ?? state.scanIntervalMs,
+        // A restored local preference must not be replaced by the server's startup default.
+        scanIntervalMs: window.localStorage.getItem('eyecan.scanIntervalMs') !== null
+          ? state.scanIntervalMs : payload.scan_interval_ms ?? state.scanIntervalMs,
         scanStep: interactionMode === 'EXPLORE' ? payload.scan_step ?? state.scanStep : state.scanStep,
         connectionState: payload.connection_state ?? state.connectionState,
         lastBlinkEvent: payload.last_blink_event ?? state.lastBlinkEvent,
