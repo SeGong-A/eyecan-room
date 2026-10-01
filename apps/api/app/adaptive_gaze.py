@@ -83,27 +83,37 @@ class OnlinePPOTrainer:
         import numpy as np
 
         torch = self.torch
-        obs_t = torch.as_tensor(np.array(self.obs_list), dtype=torch.float32, device=self.model.device)
-        actions_t = torch.as_tensor(np.array(self.action_list), dtype=torch.float32, device=self.model.device)
-        old_log_probs_t = torch.as_tensor(np.array(self.log_prob_list), dtype=torch.float32, device=self.model.device)
-        old_values_t = torch.as_tensor(np.array(self.value_list), dtype=torch.float32, device=self.model.device)
-        rewards_t = torch.as_tensor(np.array(self.reward_list), dtype=torch.float32, device=self.model.device)
-        self.recent_avg_reward = float(rewards_t.mean().item())
-        advantages = (rewards_t - old_values_t).detach()
-        if advantages.std() > 1e-6:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        self.optimizer.zero_grad()
-        values, log_prob, entropy = self.policy.evaluate_actions(obs_t, actions_t)
-        ratio = torch.exp(log_prob - old_log_probs_t)
-        policy_loss = -torch.min(advantages * ratio, advantages * torch.clamp(ratio, 0.85, 1.15)).mean()
-        value_loss = torch.nn.functional.mse_loss(values.squeeze(-1), rewards_t)
-        entropy_loss = -torch.mean(entropy) if entropy is not None else 0.0
-        loss = policy_loss + 0.5 * value_loss + 0.01 * entropy_loss
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
-        self.optimizer.step()
-        self.update_count += 1
-        self.clear()
+        try:
+            obs_t = torch.as_tensor(np.array(self.obs_list), dtype=torch.float32, device=self.model.device)
+            actions_t = torch.as_tensor(np.array(self.action_list), dtype=torch.float32, device=self.model.device)
+            old_log_probs_t = torch.as_tensor(np.array(self.log_prob_list), dtype=torch.float32, device=self.model.device)
+            old_values_t = torch.as_tensor(np.array(self.value_list), dtype=torch.float32, device=self.model.device)
+            rewards_t = torch.as_tensor(np.array(self.reward_list), dtype=torch.float32, device=self.model.device)
+            self.recent_avg_reward = float(rewards_t.mean().item())
+            advantages = (rewards_t - old_values_t).detach()
+            if advantages.std() > 1e-6:
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            self.optimizer.zero_grad()
+            values, log_prob, entropy = self.policy.evaluate_actions(obs_t, actions_t)
+            ratio = torch.exp(log_prob - old_log_probs_t)
+            policy_loss = -torch.min(advantages * ratio, advantages * torch.clamp(ratio, 0.85, 1.15)).mean()
+            value_loss = torch.nn.functional.mse_loss(values.squeeze(-1), rewards_t)
+            entropy_loss = -torch.mean(entropy) if entropy is not None else 0.0
+            loss = policy_loss + 0.5 * value_loss + 0.01 * entropy_loss
+            # backward()/step()은 NaN·Inf에도 예외 없이 조용히 발산한 가중치를 만들 수
+            # 있어서, 명시적으로 유한성을 확인해 "실패"로 취급한다.
+            if not torch.isfinite(loss):
+                raise RuntimeError(f"non-finite PPO loss: {loss.item()!r}")
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+            self.optimizer.step()
+            self.update_count += 1
+            self.clear()
+        except Exception:
+            # 학습 한 스텝이 실패하면(텐서 오류, NaN 발산 등) 이 실패를 밖으로 던져서
+            # 비전 파이프라인 전체를 죽이는 대신, 기본 모델로 되돌리고 버퍼를 비운다
+            # (reset()이 이미 그 일을 함 — 개인화 가중치 파일도 같이 삭제된다).
+            self.reset()
 
     def save(self) -> None:
         directory = os.path.dirname(self.personalized_model_path)

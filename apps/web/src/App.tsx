@@ -46,6 +46,7 @@ function App() {
   });
 
   const lastBlinkRef = useRef(0);
+  const prevLearningCountRef = useRef(store.learningUpdateCount);
   useEffect(() => {
     document.documentElement.dataset.theme = store.themeMode;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', store.themeMode === 'dark' ? '#171B1A' : '#F7F9F8');
@@ -81,6 +82,14 @@ function App() {
     connect();
     return () => { disposed = true; window.clearTimeout(retryId); socket?.close(); };
   }, [store.setConnectionState, store.syncFromServer, notify]);
+  useEffect(() => {
+    // learningUpdateCount는 서버가 PPO 한 스텝을 학습할 때마다(90개 경험이 쌓일 때마다)
+    // 증가해서 스냅샷으로 내려온다 — 증가분을 직접 감지해서 매 업데이트마다 토스트로 알린다.
+    if (store.learningUpdateCount > prevLearningCountRef.current) {
+      notify(`개인화 학습 업데이트 완료 (${store.learningUpdateCount}번째)`, 'success');
+    }
+    prevLearningCountRef.current = store.learningUpdateCount;
+  }, [store.learningUpdateCount, notify]);
   useEffect(() => {
     if (!store.blinkSequence || store.blinkSequence === lastBlinkRef.current || store.emergencyActive) return;
     lastBlinkRef.current = store.blinkSequence;
