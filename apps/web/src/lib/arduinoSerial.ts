@@ -551,11 +551,15 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
 
   if (command === 'CURTAIN_OPEN' || command === 'CURTAIN_CLOSE' || command === 'CURTAIN_STOP' ||
       command === 'WINDOW_OPEN' || command === 'WINDOW_CLOSE' || command === 'WINDOW_STOP') {
-    const nextServoAngle =
-      command === 'CURTAIN_OPEN' || command === 'WINDOW_OPEN' ? 180 :
-      command === 'CURTAIN_CLOSE' || command === 'WINDOW_CLOSE' ? 0 :
-      levels.servo;
-    return { sequence: ['m', '2', String(nextServoAngle)], nextServoAngle };
+    // 커튼 서보는 연속회전형이라 각도가 "위치"가 아니라 "속도/방향"이다(90=정지).
+    // o=열기 시작(고정 속도로 계속 회전), k=닫기 시작(반대 방향), s=정지(90으로
+    // 즉시 복귀). 예전처럼 마지막 목표 각도를 다시 보내는 방식은 연속회전
+    // 서보에서는 "그 방향으로 계속 돌아라"와 같은 뜻이라 실제로는 멈추지 않았다.
+    const char =
+      command === 'CURTAIN_OPEN' || command === 'WINDOW_OPEN' ? 'o' :
+      command === 'CURTAIN_CLOSE' || command === 'WINDOW_CLOSE' ? 'k' :
+      's';
+    return { sequence: ['m', '2', char] };
   }
 
   // CAM_LEFT/RIGHT/UP/DOWN은 선택적으로 ":<도수>" 접미사를 받는다(예: 'CAM_LEFT:12') —
