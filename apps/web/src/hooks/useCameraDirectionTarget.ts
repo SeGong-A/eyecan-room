@@ -5,8 +5,12 @@ import type { ScanTarget } from '../types/control';
 // integrated Arduino firmware.
 export const CAMERA_HOME_PAN = 90;
 export const CAMERA_HOME_TILT = 20;
-export const DIRECTION_ENTER_DEGREES = 15;
-export const DIRECTION_EXIT_DEGREES = 10;
+// The firmware clamps tilt to TILT_MIN_ANGLE=10 (to stop the camera drooping
+// too far down), which leaves only a 10 degree window above home (20) to
+// reach the LIGHT zone. The enter/exit thresholds must fit inside that
+// window or LIGHT becomes permanently unreachable.
+export const DIRECTION_ENTER_DEGREES = 9;
+export const DIRECTION_EXIT_DEGREES = 5;
 const HOLD_MS = 500;
 
 export function cameraDirectionTarget(

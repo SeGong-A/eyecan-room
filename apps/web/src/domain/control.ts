@@ -71,8 +71,8 @@ export const scanItems: Record<ScanTarget, CommandItem[]> = {
     { label: '어둡게', description: '조명 어둡게', command: 'LIGHT_DOWN', icon: Minus }, cancel
   ],
   CURTAIN: [
-    { label: '열기', description: '커튼 열기', command: 'CURTAIN_OPEN', icon: ArrowLeftRight },
-    { label: '닫기', description: '커튼 닫기', command: 'CURTAIN_CLOSE', icon: Blinds },
+    { label: '닫기', description: '커튼 닫기', command: 'CURTAIN_OPEN', icon: ArrowLeftRight },
+    { label: '열기', description: '커튼 열기', command: 'CURTAIN_CLOSE', icon: Blinds },
     { label: '멈춤', description: '커튼 멈춤', command: 'CURTAIN_STOP', icon: Square }, cancel
   ]
 };
