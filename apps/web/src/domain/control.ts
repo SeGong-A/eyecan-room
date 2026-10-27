@@ -1,15 +1,16 @@
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, ArrowLeftRight, Blinds,
   Check, Clock3, Eye, Fan, Gauge, Lightbulb, Minus, Moon, Move, Plus, Power,
-  RotateCcw, Save, Settings, SlidersHorizontal, Square, Sun, Wind, X
+  RotateCcw, Save, Settings, SlidersHorizontal, Square, Sun, Tv,
+  Wind, X
 } from 'lucide-react';
 import type { CommandItem, FullGazeDirection, ScanTarget, SettingsMenu, TargetMeta } from '../types/control';
 
 export const targetMeta: Record<ScanTarget, TargetMeta> = {
-  FAN: { name: '선풍기', icon: Fan }, LIGHT: { name: '조명', icon: Lightbulb }, CURTAIN: { name: '커튼', icon: Blinds }
+  FAN: { name: '선풍기', icon: Fan }, LIGHT: { name: '조명', icon: Lightbulb },
+  CURTAIN: { name: '커튼', icon: Blinds }, TV: { name: 'TV', icon: Tv }
 };
 const back: CommandItem = { label: '뒤로', description: '이전 설정으로 돌아갑니다', command: 'BACK', icon: ArrowLeft };
-const cancel: CommandItem = { label: '취소', description: '선택을 취소합니다', command: 'CANCEL', icon: X };
 
 export const settingsItems: Record<SettingsMenu, CommandItem[]> = {
   ROOT: [
@@ -58,24 +59,42 @@ export function parentSettingsMenu(menu: SettingsMenu): SettingsMenu {
 
 export const scanItems: Record<ScanTarget, CommandItem[]> = {
   FAN: [
-    { label: '켜기', description: '선풍기 켜기', command: 'FAN_ON', icon: Power },
-    { label: '끄기', description: '선풍기 끄기', command: 'FAN_OFF', icon: Power },
     { label: '약풍', description: '선풍기 약풍', command: 'FAN_LOW', icon: Wind },
     { label: '중풍', description: '선풍기 중풍', command: 'FAN_MID', icon: Wind },
-    { label: '강풍', description: '선풍기 강풍', command: 'FAN_HIGH', icon: Gauge }, cancel
+    { id: 'back-1', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft },
+    { label: '강풍', description: '선풍기 강풍', command: 'FAN_HIGH', icon: Gauge },
+    { label: '끄기', description: '선풍기 끄기', command: 'FAN_OFF', icon: Power },
+    { id: 'back-2', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft }
   ],
   LIGHT: [
-    { label: '켜기', description: '조명 켜기', command: 'LIGHT_ON', icon: Power },
-    { label: '끄기', description: '조명 끄기', command: 'LIGHT_OFF', icon: Power },
-    { label: '밝게', description: '조명 밝게', command: 'LIGHT_UP', icon: Plus },
-    { label: '어둡게', description: '조명 어둡게', command: 'LIGHT_DOWN', icon: Minus }, cancel
+    { label: '30%', description: '조명 밝기 30%', command: 'LIGHT_LEVEL_3', icon: Lightbulb },
+    { label: '60%', description: '조명 밝기 60%', command: 'LIGHT_LEVEL_6', icon: Lightbulb },
+    { id: 'back-1', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft },
+    { label: '100%', description: '조명 밝기 100%', command: 'LIGHT_LEVEL_10', icon: Sun },
+    { label: '끄기', description: '조명 끄기', command: 'LIGHT_LEVEL_0', icon: Power },
+    { id: 'back-2', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft }
   ],
   CURTAIN: [
-    { label: '닫기', description: '커튼 닫기', command: 'CURTAIN_OPEN', icon: ArrowLeftRight },
     { label: '열기', description: '커튼 열기', command: 'CURTAIN_CLOSE', icon: Blinds },
-    { label: '멈춤', description: '커튼 멈춤', command: 'CURTAIN_STOP', icon: Square }, cancel
+    { label: '정지', description: '커튼 정지', command: 'CURTAIN_STOP', icon: Square },
+    { id: 'back-1', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft },
+    { label: '닫기', description: '커튼 닫기', command: 'CURTAIN_OPEN', icon: ArrowLeftRight },
+    { id: 'back-2', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft }
+  ],
+  TV: [
+    { label: 'CH−', description: '이전 채널', command: 'TV_CHANNEL_PREV', icon: Minus },
+    { label: '전원', description: 'TV 전원을 전환합니다', command: 'TV_POWER', icon: Power },
+    { id: 'back-1', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft },
+    { label: 'CH+', description: '다음 채널', command: 'TV_CHANNEL_NEXT', icon: Plus },
+    { id: 'back-2', label: '뒤로', description: '방 화면으로 돌아갑니다', command: 'BACK', icon: ArrowLeft }
   ]
 };
+
+export const caregiverDeviceCommands: CommandItem[] = [
+  { label: '선풍기 켜기', description: '선풍기 최대 출력', command: 'FAN_ON', icon: Fan },
+  { label: '조명 밝게', description: '조명 밝기 한 단계 올리기', command: 'LIGHT_UP', icon: Plus },
+  { label: '조명 어둡게', description: '조명 밝기 한 단계 내리기', command: 'LIGHT_DOWN', icon: Minus }
+];
 export const directionLabel: Record<FullGazeDirection, string> = { CENTER: '정면', LEFT: '왼쪽', RIGHT: '오른쪽', UP: '위', DOWN: '아래' };
 export function arduinoStatusText(status: string) {
   if (status === 'UNSUPPORTED') return '지원하지 않는 브라우저';

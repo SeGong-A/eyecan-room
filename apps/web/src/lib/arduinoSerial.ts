@@ -38,13 +38,13 @@ type ArduinoListener = (event: ArduinoEvent) => void;
 
 const BAUD_RATE = 9600;
 const WRITE_DELAY_MS = 90;
-const ACK_WAIT_MS = 260;
+const COMMAND_ACK_TIMEOUT_MS = 2500;
 const MOTION_ACK_TIMEOUT_MS = 250;
 const CAMERA_HOME_REPORT_TIMEOUT_MS = 5000;
 const CAMERA_HOME_SETTLE_MS = 1000;
 // Keep aligned with PAN_HOME_ANGLE / TILT_HOME_ANGLE in the integrated sketch.
-const CAMERA_HOME_PAN = 90;
-const CAMERA_HOME_TILT = 20;
+const CAMERA_HOME_PAN = 152;
+const CAMERA_HOME_TILT = 16;
 const MAX_RECENT_LINES = 40;
 
 let port: SerialPortLike | null = null;
@@ -67,7 +67,7 @@ const motionAckWaiters = new Map<number, {
   timeoutId: number;
 }>();
 
-const levels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 90, servo: 90 };
+const levels: ArduinoLevels = { light: 0, fan: 0, pan: CAMERA_HOME_PAN, tilt: CAMERA_HOME_TILT, servo: 90 };
 const listeners = new Set<ArduinoListener>();
 
 function sleep(ms: number) {
@@ -126,8 +126,8 @@ function emit(event: ArduinoEvent) {
 function resetLevels() {
   levels.light = 0;
   levels.fan = 0;
-  levels.pan = 90;
-  levels.tilt = 90;
+  levels.pan = CAMERA_HOME_PAN;
+  levels.tilt = CAMERA_HOME_TILT;
   levels.servo = 90;
 }
 
@@ -315,20 +315,30 @@ function waitForMotionAck(commandId: number): Promise<MotionAck> {
 async function sendMotionLine(lineFactory: (commandId: number) => string): Promise<MotionAck> {
   if (!writer) throw new Error('Arduino가 연결되지 않았습니다');
   const commandId = ++motionCommandId;
-  const ackPromise = waitForMotionAck(commandId);
-  try {
-    await enqueueWrite([lineFactory(commandId)], 0);
-    return await ackPromise;
-  } catch (error) {
-    const waiter = motionAckWaiters.get(commandId);
-    if (waiter) {
-      window.clearTimeout(waiter.timeoutId);
-      motionAckWaiters.delete(commandId);
+  const run = async () => {
+    if (!writer) throw new Error('Arduino가 연결되지 않았습니다');
+    const ackPromise = waitForMotionAck(commandId);
+    try {
+      await writer.write(new TextEncoder().encode(`${lineFactory(commandId)}\n`));
+      return await ackPromise;
+    } catch (error) {
+      const waiter = motionAckWaiters.get(commandId);
+      if (waiter) {
+        window.clearTimeout(waiter.timeoutId);
+        motionAckWaiters.delete(commandId);
+      }
+      // The promise may have rejected first; mark it handled before propagating.
+      void ackPromise.catch(() => {});
+      throw error;
     }
-    // The promise may have rejected first; mark it handled before propagating.
-    void ackPromise.catch(() => {});
-    throw error;
-  }
+  };
+
+  // Keep the complete write/ACK exchange behind earlier serial work. Starting
+  // the timeout before this command reached the writer caused false timeouts
+  // whenever a gaze velocity command was still draining from the queue.
+  const result = writeChain.then(run, run);
+  writeChain = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 export async function queryMotionState(): Promise<MotionAck> {
@@ -525,19 +535,26 @@ export async function disconnectArduino(): Promise<void> {
 
 type CommandMapping = {
   sequence: string[];
+  ackPattern: RegExp;
   nextLightLevel?: number;
   nextFanLevel?: number;
   nextServoAngle?: number;
 };
 
 export function commandToArduinoSequence(command: string): CommandMapping | null {
-  if (command === 'LIGHT_ON' || command === 'LIGHT_OFF' || command === 'LIGHT_UP' || command === 'LIGHT_DOWN') {
+  const lightLevelMatch = command.match(/^LIGHT_LEVEL_(0|3|6|10)$/);
+  if (command === 'LIGHT_ON' || command === 'LIGHT_OFF' || command === 'LIGHT_UP' || command === 'LIGHT_DOWN' || lightLevelMatch) {
     const nextLightLevel =
+      lightLevelMatch ? Number(lightLevelMatch[1]) :
       command === 'LIGHT_ON' ? 10 :
       command === 'LIGHT_OFF' ? 0 :
       command === 'LIGHT_UP' ? Math.min(10, levels.light + 2) :
       Math.max(0, levels.light - 2);
-    return { sequence: ['m', '3', String(nextLightLevel)], nextLightLevel };
+    return {
+      sequence: ['m', '3', String(nextLightLevel)],
+      ackPattern: new RegExp(`^조명 밝기 변경 -> Level ${nextLightLevel}(?:\\s|$)`),
+      nextLightLevel
+    };
   }
 
   if (command === 'FAN_ON' || command === 'FAN_OFF' || command === 'FAN_LOW' || command === 'FAN_MID' || command === 'FAN_HIGH') {
@@ -546,7 +563,11 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
       command === 'FAN_LOW' ? 3 :
       command === 'FAN_MID' ? 6 :
       10;
-    return { sequence: ['m', '4', String(nextFanLevel)], nextFanLevel };
+    return {
+      sequence: ['m', '4', String(nextFanLevel)],
+      ackPattern: new RegExp(`^선풍기 속도 변경 -> Level ${nextFanLevel}(?:\\s|$)`),
+      nextFanLevel
+    };
   }
 
   if (command === 'CURTAIN_OPEN' || command === 'CURTAIN_CLOSE' || command === 'CURTAIN_STOP' ||
@@ -559,7 +580,8 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
       command === 'CURTAIN_OPEN' || command === 'WINDOW_OPEN' ? 'o' :
       command === 'CURTAIN_CLOSE' || command === 'WINDOW_CLOSE' ? 'k' :
       's';
-    return { sequence: ['m', '2', char] };
+    const ackPattern = char === 'o' ? /^커튼 열기 시작/ : char === 'k' ? /^커튼 닫기 시작/ : /^커튼 정지/;
+    return { sequence: ['m', '2', char], ackPattern };
   }
 
   // CAM_LEFT/RIGHT/UP/DOWN은 선택적으로 ":<도수>" 접미사를 받는다(예: 'CAM_LEFT:12') —
@@ -570,7 +592,7 @@ export function commandToArduinoSequence(command: string): CommandMapping | null
   if (camMatch) {
     const [, direction, degrees] = camMatch;
     const char = { LEFT: 'a', RIGHT: 'd', UP: 'w', DOWN: 's' }[direction as 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'];
-    return { sequence: ['m', '1', degrees ? `${char} ${degrees}` : char] };
+    return { sequence: ['m', '1', degrees ? `${char} ${degrees}` : char], ackPattern: /^카메라 이동 -> Pan:/ };
   }
   return null;
 }
@@ -580,32 +602,38 @@ export async function writeArduinoCommand(command: string): Promise<ArduinoWrite
   if (!mapping) return { ok: true, skipped: true, command };
   if (!writer) return { ok: false, command, error: 'Arduino가 연결되지 않았습니다' };
 
-  const rejection = { message: null as string | null };
-  const unsubscribe = subscribeArduino((event) => {
-    if (event.type === 'rejected') rejection.message = event.message;
+  let timeoutId = 0;
+  let rejected = false;
+  let unsubscribe = () => {};
+  const acknowledgement = new Promise<string>((resolve, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error('Arduino 명령 응답 시간이 초과되었습니다')), COMMAND_ACK_TIMEOUT_MS);
+    unsubscribe = subscribeArduino((event) => {
+      if (event.type === 'rejected') {
+        rejected = true;
+        reject(new Error(event.message));
+      }
+      if (event.type === 'line' && mapping.ackPattern.test(event.line)) resolve(event.line);
+    });
   });
 
   try {
     await enqueueWrite(mapping.sequence);
+    const ack = await acknowledgement;
 
     if (typeof mapping.nextLightLevel === 'number') levels.light = mapping.nextLightLevel;
     if (typeof mapping.nextFanLevel === 'number') levels.fan = mapping.nextFanLevel;
     if (typeof mapping.nextServoAngle === 'number') levels.servo = mapping.nextServoAngle;
 
-    // Give the sketch a moment to echo an acknowledgement or a rejection line.
-    await sleep(ACK_WAIT_MS);
-
-    if (rejection.message) {
-      return { ok: true, command, rejected: true, error: rejection.message };
-    }
-    return { ok: true, command, ack: recentLines[recentLines.length - 1] };
+    return { ok: true, command, ack };
   } catch (error) {
     return {
       ok: false,
       command,
+      rejected,
       error: error instanceof Error ? error.message : 'Arduino 전송 중 오류가 발생했습니다'
     };
   } finally {
+    window.clearTimeout(timeoutId);
     unsubscribe();
   }
 }

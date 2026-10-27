@@ -12,6 +12,7 @@ import time
 import uuid
 
 from .adaptive_gaze import AdaptiveGazeController
+from .learning_gate import RoomLearningGate
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class GazeSample:
     omega_y: float = 0.0
     ready: bool = False
     learning_enabled: bool = True
+    learning_active: bool = False
     learning_update_count: int = 0
     error_x: float = 0.0
     error_y: float = 0.0
@@ -132,7 +134,13 @@ def _find_face_camera_index(
     return best_index
 
 
-def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, command_queue) -> None:
+def _vision_worker(
+    camera_index: int,
+    tracking_session_id: str,
+    initial_learning_enabled: bool,
+    sample_queue,
+    command_queue,
+) -> None:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp")
     try:
         import cv2
@@ -168,6 +176,8 @@ def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, co
             base_model_path=model_paths.model_path,
             personalized_model_path=model_paths.personalized_model_path,
         )
+        learning_gate = RoomLearningGate(requested=initial_learning_enabled)
+        controller.set_learning(False)
 
         selected_camera_index = camera_index
         if camera_index < 0:
@@ -191,18 +201,36 @@ def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, co
                 while True:
                     command = command_queue.get_nowait()
                     action = command.get("action")
-                    if action == "learning":
-                        controller.set_learning(bool(command.get("enabled")))
-                    elif action == "save":
-                        controller.save()
-                    elif action == "reset":
-                        controller.reset()
-                    elif action == "recenter":
-                        controller.recenter()
-                    elif action == "stop":
-                        controller.save()
-                        return
-                    sample_queue.put({"type": "control", "action": action, "ok": True})
+                    request_id = command.get("request_id")
+                    try:
+                        if action == "learning":
+                            learning_gate.requested = bool(command.get("enabled"))
+                            controller.set_learning(learning_gate.active(time.monotonic()))
+                        elif action == "room_visibility":
+                            learning_gate.refresh(float(command.get("expires_at", 0)), time.monotonic())
+                            controller.set_learning(learning_gate.active(time.monotonic()))
+                        elif action == "save":
+                            controller.save()
+                        elif action == "reset":
+                            controller.reset()
+                        elif action == "recenter":
+                            controller.recenter()
+                        elif action == "stop":
+                            controller.save()
+                        else:
+                            raise ValueError(f"Unknown vision control action: {action}")
+                    except Exception as exc:
+                        sample_queue.put({
+                            "type": "control", "request_id": request_id,
+                            "action": action, "ok": False, "error": str(exc),
+                        })
+                    else:
+                        sample_queue.put({
+                            "type": "control", "request_id": request_id,
+                            "action": action, "ok": True,
+                        })
+                        if action == "stop":
+                            return
             except Empty:
                 pass
 
@@ -218,18 +246,22 @@ def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, co
             sample_sequence += 1
 
             if not result.face_landmarks:
+                controller.set_learning(learning_gate.active(time.monotonic()))
                 controller.handle_face_lost()
                 sample_queue.put({"type": "sample", "sample": GazeSample(
                     x=0.5,
                     y=0.5,
                     ear=0.0,
                     face_detected=False,
+                    learning_enabled=learning_gate.requested,
+                    learning_update_count=controller.trainer.update_count,
                     sample_sequence=sample_sequence,
                     tracking_session_id=tracking_session_id,
                 )})
                 time.sleep(0.03)
                 continue
 
+            controller.set_learning(learning_gate.active(time.monotonic()))
             output = controller.update(result.face_landmarks[0])
             sample_queue.put({"type": "sample", "sample": GazeSample(
                 x=output.point_x,
@@ -239,7 +271,8 @@ def _vision_worker(camera_index: int, tracking_session_id: str, sample_queue, co
                 omega_x=output.omega_x,
                 omega_y=output.omega_y,
                 ready=output.ready,
-                learning_enabled=output.learning_enabled,
+                learning_enabled=learning_gate.requested,
+                learning_active=output.learning_enabled,
                 learning_update_count=output.update_count,
                 error_x=output.error_x,
                 error_y=output.error_y,
@@ -271,9 +304,16 @@ class VisionGazeTracker:
         self.error: str | None = None
         self._command_queue = None
         self.last_control_result: dict[str, object] | None = None
+        self._control_waiters: dict[str, Event] = {}
+        self._control_results: dict[str, dict[str, object]] = {}
         self.tracking_session_id = ""
 
-    def start(self, camera_index: int, on_sample: Callable[[GazeSample], None]) -> None:
+    def start(
+        self,
+        camera_index: int,
+        on_sample: Callable[[GazeSample], None],
+        learning_enabled: bool = True,
+    ) -> None:
         with self._lock:
             if self._process and self._process.is_alive():
                 return
@@ -294,7 +334,7 @@ class VisionGazeTracker:
             self._command_queue = context.Queue()
             self._process = context.Process(
                 target=_vision_worker,
-                args=(camera_index, self.tracking_session_id, sample_queue, self._command_queue),
+                args=(camera_index, self.tracking_session_id, learning_enabled, sample_queue, self._command_queue),
                 daemon=True,
             )
             self._process.start()
@@ -318,6 +358,28 @@ class VisionGazeTracker:
             return False
         self._command_queue.put({"action": action, **payload})
         return True
+
+    def send_control_and_wait(
+        self,
+        action: str,
+        timeout: float = 3.0,
+        **payload: object,
+    ) -> dict[str, object] | None:
+        if not self._process or not self._process.is_alive() or self._command_queue is None:
+            return None
+        request_id = uuid.uuid4().hex
+        waiter = Event()
+        with self._lock:
+            self._control_waiters[request_id] = waiter
+        self._command_queue.put({"action": action, "request_id": request_id, **payload})
+        if not waiter.wait(timeout):
+            with self._lock:
+                self._control_waiters.pop(request_id, None)
+                self._control_results.pop(request_id, None)
+            return {"action": action, "ok": False, "error": "Vision control response timeout"}
+        with self._lock:
+            self._control_waiters.pop(request_id, None)
+            return self._control_results.pop(request_id, None)
 
     def _set_error(self, message: str) -> None:
         with self._lock:
@@ -354,6 +416,13 @@ class VisionGazeTracker:
                 break
             elif message_type == "control":
                 self.last_control_result = message
+                request_id = message.get("request_id")
+                if request_id:
+                    with self._lock:
+                        self._control_results[request_id] = message
+                        waiter = self._control_waiters.get(request_id)
+                    if waiter:
+                        waiter.set()
 
         if self.status != "ERROR":
             self._set_status("STOPPED")

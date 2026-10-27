@@ -8,14 +8,15 @@ import { GazeJoystick } from './GazeJoystick';
 import { Button, IconButton } from './ui';
 
 type Props = {
+  aacActive?: boolean; aacReady?: boolean;
   children: ReactNode; roomCameraReady: boolean; roomVideoRef: RefCallback<HTMLVideoElement>; store: AppState;
   onConnectArduino: () => void; onDisconnectArduino: () => void; onOpenSettings: () => void; onReconnectCamera: () => void;
 };
 
-export function RoomView({ children, roomCameraReady, roomVideoRef, store, onConnectArduino, onDisconnectArduino, onOpenSettings, onReconnectCamera }: Props) {
+export function RoomView({ children, aacActive = false, aacReady = false, roomCameraReady, roomVideoRef, store, onConnectArduino, onDisconnectArduino, onOpenSettings, onReconnectCamera }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const closeDetails = useCallback(() => setDetailsOpen(false), []);
-  const exploring = store.interactionMode === 'EXPLORE';
+  const exploring = store.interactionMode === 'EXPLORE' && !aacActive;
   const target = !exploring && store.interactionMode === 'COMMAND' ? store.selectedTarget : store.activeAngleTarget;
   const TargetIcon = target ? targetMeta[target].icon : CircleDot;
   const tracking = store.visionStatus === 'RUNNING' && store.faceDetected && store.gazeReady && store.connectionState === 'STREAMING';
@@ -23,11 +24,11 @@ export function RoomView({ children, roomCameraReady, roomVideoRef, store, onCon
 
   return <section className="room-fullscreen" id="main-view">
     {roomCameraReady ? <video className="room-video" ref={roomVideoRef} muted playsInline aria-label="외장 룸 카메라 화면" /> : <div className="room-empty-feed">
-      <VideoOff size={40} strokeWidth={1.5} aria-hidden="true" /><h1>방 카메라 연결이 끊겼습니다</h1><Button onClick={onReconnectCamera}>다시 연결</Button>
+      {!aacActive && <><VideoOff size={40} strokeWidth={1.5} aria-hidden="true" /><h1>방 카메라 연결이 끊겼습니다</h1><Button onClick={onReconnectCamera}>다시 연결</Button></>}
     </div>}
     <header className="room-header">
       <div className="room-brand"><BrandLogo /></div>
-      <div className={`current-target ${target ? 'has-target' : ''}`}><TargetIcon size={24} aria-hidden="true" /><div><span>{store.interactionMode === 'COMMAND' ? '선택한 대상' : '현재 대상'}</span><strong>{target ? targetMeta[target].name : '선택 없음'}</strong></div></div>
+      <div className={`current-target ${target ? 'has-target' : ''}`}><TargetIcon size={24} aria-hidden="true" /><div><span>{store.interactionMode === 'COMMAND' ? '선택한 대상' : '현재 대상'}</span><strong>{aacActive || aacReady ? '의사소통' : target ? targetMeta[target].name : '선택 없음'}</strong></div></div>
       <div className="room-tools">
         <ConnectionDetails store={store} open={detailsOpen} onToggle={() => setDetailsOpen((open) => !open)} onClose={closeDetails} onConnect={onConnectArduino} onDisconnect={onDisconnectArduino} />
         <IconButton label="설정" className="room-settings-button" disabled={!exploring} onClick={onOpenSettings}><Settings size={22} aria-hidden="true" /></IconButton>

@@ -37,20 +37,41 @@ async function noMenuOverlap(page: Page) {
   expect(overlaps).toEqual([]);
 }
 
-async function selectCommand(page: Page, command: string, interval = 2000) {
+type RoomMock = Awaited<ReturnType<typeof mockRoom>>;
+
+async function selectCommand(page: Page, mock: RoomMock, command: string, interval = 2000) {
   const items = await page.locator('.radial-command').evaluateAll((nodes) => nodes.map((node) => ({ command: node.getAttribute('data-command'), active: node.classList.contains('active') })));
   const index = items.findIndex((item) => item.command === command);
   expect(index).toBeGreaterThanOrEqual(0);
   const steps = (index - items.findIndex((item) => item.active) + items.length) % items.length;
-  if (steps) await page.clock.runFor(steps * interval);
+  if (steps) await page.clock.runFor(steps * interval + 300);
   await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', command);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await mock.blink();
 }
 
 async function pauseClock(page: Page) {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
 }
+
+async function openRotationSettings(page: Page) {
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await page.getByRole('button', { name: '로테이션 설정 열기' }).click();
+}
+
+test('F enters app fullscreen and the menu has no mouse selection button', async ({ page }) => {
+  const mock = await mockRoom(page);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: '시작하기' })).toBeVisible();
+  await page.keyboard.press('f');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
+  await page.evaluate(() => document.exitFullscreen());
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await mock.enterRoom();
+  await mock.menu('TV');
+  await expect(page.getByRole('button', { name: '선택', exact: true })).toHaveCount(0);
+  await expect(page.locator('.radial-current')).toContainText('현재 선택');
+});
 
 for (const theme of ['light', 'dark'] as const) for (const viewport of viewports) {
   test(`layout ${theme} ${viewport.width}x${viewport.height}`, async ({ page }, info) => {
@@ -59,7 +80,7 @@ for (const theme of ['light', 'dark'] as const) for (const viewport of viewports
     await page.setViewportSize(viewport);
     const mock = await mockRoom(page, { theme });
     await page.goto('/');
-    await expect(page.locator('.brand-symbol use')).toHaveAttribute('href', '/brand/eyecan.svg#mark');
+    await expect(page.locator('.brand-image')).toHaveAttribute('src', '/brand/eyecan-room-final-logo.png');
     await fitsViewport(page, '.home-start');
     await capture(page, info, 'home');
     await page.getByRole('button', { name: '시작하기' }).click();
@@ -76,7 +97,7 @@ for (const theme of ['light', 'dark'] as const) for (const viewport of viewports
     await fitsViewport(page, '.room-tools');
     await fitsViewport(page, '.current-target');
     await capture(page, info, 'room');
-    for (const [target, count] of [['CURTAIN', 4], ['LIGHT', 5], ['FAN', 6]] as const) {
+    for (const [target, count] of [['CURTAIN', 5], ['LIGHT', 6], ['FAN', 6], ['TV', 5]] as const) {
       await mock.menu(target);
       await expect(page.locator('.radial-command')).toHaveCount(count);
       await fitsViewport(page, '.radial-current');
@@ -125,17 +146,18 @@ test('two second scanner wraps monotonically and cancel sends no command', async
   await mock.enterRoom();
   await pauseClock(page);
   await mock.menu('FAN');
-  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_ON');
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_LOW');
   await page.clock.runFor(1999);
-  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_ON');
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_LOW');
   await page.clock.runFor(1);
-  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_OFF');
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_MID');
   await page.clock.runFor(10000);
   await expect(page.locator('.command-wheel')).toHaveAttribute('style', '--wheel-rotation: -360deg;');
-  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_ON');
-  await page.clock.runFor(10000);
-  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'CANCEL');
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'FAN_LOW');
+  await page.clock.runFor(4000);
+  await page.clock.runFor(240);
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-item-id', 'back-1');
+  await mock.blink();
   await expect(page.locator('.radial-overlay')).toHaveCount(0);
   expect(mock.requests.filter((url) => url.startsWith('/events/command'))).toEqual([]);
 });
@@ -144,20 +166,17 @@ test('settings hierarchy, speed and theme persist across reload', async ({ page 
   const mock = await mockRoom(page);
   await mock.enterRoom();
   await pauseClock(page);
-  await page.getByRole('button', { name: '설정', exact: true }).click();
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await openRotationSettings(page);
+  await mock.blink();
   await expect(page.locator('.radial-center h2')).toHaveText('선택 속도');
   await expect(page.locator('.radial-command')).toHaveCount(6);
-  await page.clock.runFor(4000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await selectCommand(page, mock, 'SCAN_SPEED_3000');
   await expect(page.locator('.radial-overlay')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('eyecan.scanIntervalMs'))).toBe('3000');
-  await page.getByRole('button', { name: '설정', exact: true }).click();
-  await page.clock.runFor(3000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await openRotationSettings(page);
+  await selectCommand(page, mock, 'SETTINGS_THEME', 3000);
   await expect(page.locator('.radial-center h2')).toHaveText('화면');
-  await page.clock.runFor(3000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await selectCommand(page, mock, 'THEME_DARK', 3000);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.reload();
   mock.emit({ scan_interval_ms: 2000 });
@@ -166,17 +185,14 @@ test('settings hierarchy, speed and theme persist across reload', async ({ page 
   await page.getByRole('button', { name: '시작하기' }).click();
   await page.getByRole('button', { name: '방 카메라 연결로 이동' }).click();
   await page.getByRole('button', { name: '외장 카메라 연결', exact: true }).click();
-  await page.getByRole('button', { name: '설정', exact: true }).click();
-  await page.clock.runFor(9000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await openRotationSettings(page);
+  await selectCommand(page, mock, 'SETTINGS_MOTOR', 3000);
   await expect(page.locator('.radial-center h2')).toHaveText('설치 점검');
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await selectCommand(page, mock, 'SETTINGS_MOTOR_MOVE', 3000);
   await expect(page.locator('.radial-center h2')).toHaveText('카메라 이동');
-  await page.clock.runFor(12000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await selectCommand(page, mock, 'BACK', 3000);
   await expect(page.locator('.radial-center h2')).toHaveText('설치 점검');
-  await page.clock.runFor(3000);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await selectCommand(page, mock, 'SETTINGS_MOTOR_DIRECTION', 3000);
   await expect(page.locator('.radial-center h2')).toHaveText('방향 반전');
 });
 
@@ -188,31 +204,45 @@ test('mock serial command success, rejection and disconnect feedback', async ({ 
   await page.screenshot({ path: '../../docs/ui-redesign/after-connection-details.png', fullPage: true });
   await mock.menu('CURTAIN');
   await expect(page.locator('.connection-details')).toHaveCount(0);
-  await page.getByRole('button', { name: '선택', exact: true }).click();
-  await expect(page.locator('.toast--success')).toContainText('커튼 열기 명령을 전달했습니다');
+  await mock.blink();
+  await expect(page.locator('.toast--success')).toContainText('커튼 열기 명령을 접수했습니다');
   await expect(page.locator('.radial-overlay')).toHaveCount(0);
   const writes = await page.evaluate(() => (window as any).serialWrites as string[]);
-  expect(writes.join('|')).toContain('m|2|180');
-  expect(mock.requests).toContain('/events/command?command=CURTAIN_OPEN');
+  expect(writes.join('|')).toContain('m|2|k');
+  expect(mock.requests).toContain('/events/command?command=CURTAIN_CLOSE');
   await page.evaluate(() => { (window as any).serialReject = true; });
   await mock.menu('FAN');
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await mock.blink();
   await expect(page.locator('.toast--error')).toContainText('잘못된 입력');
   await expect(page.locator('.toast--success')).toHaveCount(0);
   await page.evaluate(() => (window as any).serialDisconnect());
   await expect(page.locator('.connection-trigger')).toContainText('연결 확인');
-  await expect(page.getByRole('button', { name: 'Arduino 연결', exact: true })).toBeEnabled();
 });
 
 test('unsupported serial and failed commands never show success', async ({ page }) => {
   const mock = await mockRoom(page);
   await mock.enterRoom();
-  await expect(page.getByRole('button', { name: 'Arduino 연결', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(page.locator('#main-view').getByRole('button', { name: 'Arduino 연결', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '설정 닫기' }).click();
   await mock.menu('LIGHT');
-  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await mock.blink();
   await expect(page.locator('.toast--error')).toContainText('Chrome 또는 Edge');
-  await expect(page.locator('.radial-overlay')).toHaveCount(0);
-  expect(mock.requests).toContain('/events/command?command=LIGHT_ON');
+  await expect(page.locator('.radial-overlay')).toBeVisible();
+  expect(mock.requests.filter((url) => url.startsWith('/events/command'))).toEqual([]);
+});
+
+test('caregiver panel owns weight updates and legacy device checks', async ({ page }) => {
+  const mock = await mockRoom(page, { serial: true });
+  await mock.enterRoom();
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '설정 및 점검' })).toBeVisible();
+  await page.screenshot({ path: '../../docs/ui-redesign/after-caregiver-settings.png', fullPage: true });
+  await expect(page.getByRole('button', { name: '선풍기 켜기' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '조명 밝게' })).toBeEnabled();
+  await page.getByText('가중치 자동 갱신', { exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: /가중치 자동 갱신/ })).not.toBeChecked();
+  expect(mock.requests).toContain('/vision/learning?enabled=false');
 });
 
 test('emergency interrupts every menu, traps focus and requires explicit acknowledgement', async ({ page }) => {
@@ -228,6 +258,7 @@ test('emergency interrupts every menu, traps focus and requires explicit acknowl
   await expect(page.getByText('시연 모드 · 실제 벨 및 외부 연락은 실행되지 않습니다')).toBeVisible();
   await page.getByRole('button', { name: '상황 확인 및 해제' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.radial-overlay')).toHaveCount(0);
 });
 
 test('emergency clear failure keeps the alert visible and allows retry', async ({ page }) => {
@@ -250,8 +281,9 @@ test('200 percent text zoom and reduced motion preserve controls', async ({ page
   await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
   await mock.menu('FAN');
   await expect(page.locator('.command-wheel')).toHaveCSS('transition-duration', '0s');
-  await page.getByRole('button', { name: '선택', exact: true }).scrollIntoViewIfNeeded();
-  await expect(page.getByRole('button', { name: '선택', exact: true })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '선택', exact: true })).toHaveCount(0);
+  await page.locator('.radial-current').scrollIntoViewIfNeeded();
+  await expect(page.locator('.radial-current')).toBeInViewport();
   await page.screenshot({ path: info.outputPath('zoom-200.png'), fullPage: true });
 });
 
@@ -260,7 +292,7 @@ test('every settings submenu fits mobile and personalization errors remain visib
   const mock = await mockRoom(page, { theme: 'dark' });
   await mock.enterRoom();
   await pauseClock(page);
-  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await openRotationSettings(page);
   const inspect = async (name: string) => {
     await noMenuOverlap(page);
     await fitsViewport(page, '.radial-current');
@@ -271,24 +303,24 @@ test('every settings submenu fits mobile and personalization errors remain visib
   };
   await inspect('root');
   for (const command of ['SETTINGS_SCAN_SPEED', 'SETTINGS_THEME', 'SETTINGS_PERSONALIZATION']) {
-    await selectCommand(page, command);
+    await selectCommand(page, mock, command);
     await inspect(command);
-    await selectCommand(page, 'BACK');
+    await selectCommand(page, mock, 'BACK');
   }
-  await selectCommand(page, 'SETTINGS_MOTOR');
+  await selectCommand(page, mock, 'SETTINGS_MOTOR');
   await inspect('installation');
-  await selectCommand(page, 'SETTINGS_MOTOR_MOVE');
+  await selectCommand(page, mock, 'SETTINGS_MOTOR_MOVE');
   await inspect('move');
-  await selectCommand(page, 'BACK');
-  await selectCommand(page, 'SETTINGS_MOTOR_DIRECTION');
+  await selectCommand(page, mock, 'BACK');
+  await selectCommand(page, mock, 'SETTINGS_MOTOR_DIRECTION');
   await inspect('directions');
-  await selectCommand(page, 'MOTOR_FLIP_PAN');
+  await selectCommand(page, mock, 'MOTOR_FLIP_PAN');
   expect(await page.evaluate(() => localStorage.getItem('eyecan.motorPanSign'))).toBe('-1');
-  await selectCommand(page, 'BACK');
-  await selectCommand(page, 'BACK');
-  await selectCommand(page, 'SETTINGS_PERSONALIZATION');
+  await selectCommand(page, mock, 'BACK');
+  await selectCommand(page, mock, 'BACK');
+  await selectCommand(page, mock, 'SETTINGS_PERSONALIZATION');
   await page.route('**/vision/model/save', (route) => route.fulfill({ status: 500, json: { detail: 'Mock save failure' } }));
-  await selectCommand(page, 'SETTINGS_SAVE_MODEL');
+  await selectCommand(page, mock, 'SETTINGS_SAVE_MODEL');
   await expect(page.locator('.toast--error')).toBeVisible();
   await expect(page.locator('.radial-center h2')).toHaveText('시선 개인화');
 });
@@ -298,11 +330,11 @@ for (const seconds of [1, 2, 3, 4, 5]) {
     const mock = await mockRoom(page);
     await mock.enterRoom();
     await pauseClock(page);
-    await page.getByRole('button', { name: '설정', exact: true }).click();
-    await selectCommand(page, 'SETTINGS_SCAN_SPEED');
-    await selectCommand(page, `SCAN_SPEED_${seconds * 1000}`);
+    await openRotationSettings(page);
+    await selectCommand(page, mock, 'SETTINGS_SCAN_SPEED');
+    await selectCommand(page, mock, `SCAN_SPEED_${seconds * 1000}`);
     await expect(page.locator('.radial-overlay')).toHaveCount(0);
-    await page.getByRole('button', { name: '설정', exact: true }).click();
+    await openRotationSettings(page);
     await page.clock.runFor(seconds * 1000 - 1);
     await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'SETTINGS_SCAN_SPEED');
     await page.clock.runFor(1);
@@ -319,9 +351,9 @@ for (const [command, endpoint] of [
     const mock = await mockRoom(page);
     await mock.enterRoom();
     await pauseClock(page);
-    await page.getByRole('button', { name: '설정', exact: true }).click();
-    await selectCommand(page, 'SETTINGS_PERSONALIZATION');
-    await selectCommand(page, command);
+    await openRotationSettings(page);
+    await selectCommand(page, mock, 'SETTINGS_PERSONALIZATION');
+    await selectCommand(page, mock, command);
     await expect(page.locator('.radial-overlay')).toHaveCount(0);
     expect(mock.requests).toContain(endpoint);
     await expect(page.locator('.toast--success')).toBeVisible();
@@ -329,25 +361,27 @@ for (const [command, endpoint] of [
 }
 
 for (const [target, command, index, sequence] of [
-  ['CURTAIN', 'CURTAIN_CLOSE', 1, 'm|2|0'], ['CURTAIN', 'CURTAIN_STOP', 2, 'm|2|90'],
-  ['LIGHT', 'LIGHT_ON', 0, 'm|3|10'], ['LIGHT', 'LIGHT_OFF', 1, 'm|3|0'],
-  ['LIGHT', 'LIGHT_UP', 2, 'm|3|2'], ['LIGHT', 'LIGHT_DOWN', 3, 'm|3|0'],
-  ['FAN', 'FAN_ON', 0, 'm|4|10'], ['FAN', 'FAN_OFF', 1, 'm|4|0'],
-  ['FAN', 'FAN_LOW', 2, 'm|4|3'], ['FAN', 'FAN_MID', 3, 'm|4|6'], ['FAN', 'FAN_HIGH', 4, 'm|4|10']
+  ['CURTAIN', 'CURTAIN_CLOSE', 0, 'm|2|k'], ['CURTAIN', 'CURTAIN_STOP', 1, 'm|2|s'],
+  ['CURTAIN', 'CURTAIN_OPEN', 3, 'm|2|o'],
+  ['LIGHT', 'LIGHT_LEVEL_3', 0, 'm|3|3'], ['LIGHT', 'LIGHT_LEVEL_6', 1, 'm|3|6'],
+  ['LIGHT', 'LIGHT_LEVEL_10', 3, 'm|3|10'], ['LIGHT', 'LIGHT_LEVEL_0', 4, 'm|3|0'],
+  ['FAN', 'FAN_LOW', 0, 'm|4|3'], ['FAN', 'FAN_MID', 1, 'm|4|6'],
+  ['FAN', 'FAN_HIGH', 3, 'm|4|10'], ['FAN', 'FAN_OFF', 4, 'm|4|0']
 ] as const) {
   test(`device selection ${command} preserves the serial sequence`, async ({ page }) => {
     const mock = await mockRoom(page, { serial: true });
     await mock.enterRoom();
     await pauseClock(page);
     await mock.menu(target);
-    await page.clock.runFor(index * 2000);
+    if (index) await page.clock.runFor(index * 2000 + 300);
     await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', command);
-    await page.getByRole('button', { name: '선택', exact: true }).click();
-    await page.clock.runFor(1000);
+    await expect(page.getByRole('button', { name: '선택', exact: true })).toHaveCount(0);
+    await page.clock.resume();
+    await mock.blink();
+    await expect(page.locator('.toast--success')).toContainText('명령을 접수했습니다');
     await expect(page.locator('.radial-overlay')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).serialWrites.join('|'))).toContain(sequence);
     expect(mock.requests).toContain(`/events/command?command=${command}`);
-    await expect(page.locator('.toast--success')).toContainText('명령을 전달했습니다');
   });
 }
 
@@ -373,7 +407,7 @@ test('text token contrasts meet WCAG AA in both themes', async ({ page }) => {
   for (const [name, ratio] of Object.entries(ratios)) expect(ratio, name).toBeGreaterThanOrEqual(4.5);
 });
 
-for (const [pan, tilt, target, name] of [[60, 20, 'CURTAIN', '커튼'], [120, 20, 'FAN', '선풍기'], [90, 0, 'LIGHT', '조명']] as const) {
+for (const [pan, tilt, target, name] of [[130, 16, 'CURTAIN', '커튼'], [170, 16, 'FAN', '선풍기'], [152, 10, 'LIGHT', '조명']] as const) {
   test(`camera angle and blink still select ${target}`, async ({ page }) => {
     const mock = await mockRoom(page, { serial: true });
     await mock.enterRoom();
@@ -382,12 +416,84 @@ for (const [pan, tilt, target, name] of [[60, 20, 'CURTAIN', '커튼'], [120, 20
     mock.emit({ blink_sequence: 1, last_blink_event: 'SELECT' });
     await expect(page.locator('.radial-center h2')).toHaveText(name);
     await expect(page.locator('.gaze-joystick')).toHaveCount(0);
-    mock.emit({ blink_sequence: 2, last_blink_event: 'SELECT' });
+    await expect(page.getByRole('button', { name: '선택', exact: true })).toHaveCount(0);
+    mock.emit({ is_blinking: true });
+    await expect(page.getByRole('button', { name: '선택', exact: true })).toHaveCount(0);
+    mock.emit({ is_blinking: false, blink_sequence: 2, last_blink_event: 'SELECT' });
+    await expect(page.locator('.toast--success')).toContainText('명령을 접수했습니다');
     await expect(page.locator('.radial-overlay')).toHaveCount(0);
-    await expect(page.locator('.toast--success')).toContainText('명령을 전달했습니다');
     expect(mock.requests).toContain(`/state/target?target=${target}`);
   });
 }
+
+test('home angle selects TV and direct channel commands return to the room', async ({ page }) => {
+  const mock = await mockRoom(page, { serial: true });
+  await mock.enterRoom();
+  await pauseClock(page);
+  await page.evaluate(() => (window as any).mockAngle(152, 16));
+  await expect(page.locator('.current-target strong')).toHaveText('TV');
+  await mock.menu('TV');
+  await expect(page.locator('.radial-center h2')).toHaveText('TV');
+  await expect(page.locator('.radial-command')).toHaveCount(5);
+  await selectCommand(page, mock, 'TV_CHANNEL_NEXT');
+  await page.clock.resume();
+  await expect(page.locator('.toast--success')).toContainText('다음 채널 명령을 접수했습니다');
+  await expect(page.locator('.radial-overlay')).toHaveCount(0);
+  expect(mock.requests).toContain('/tv/command?command=CHANNEL_NEXT');
+});
+
+test('TV power off rejects channel changes without closing the menu', async ({ page }) => {
+  const mock = await mockRoom(page);
+  await mock.enterRoom();
+  await pauseClock(page);
+  await mock.menu('TV');
+  await selectCommand(page, mock, 'TV_POWER');
+  await page.clock.resume();
+  await expect(page.locator('.toast--success')).toContainText('TV 전원을 전환합니다 명령을 접수했습니다');
+  await expect(page.locator('.radial-overlay')).toHaveCount(0);
+  await mock.menu('TV');
+  await expect(page.locator('.radial-command.active')).toHaveAttribute('data-command', 'TV_CHANNEL_PREV');
+  await page.clock.resume();
+  await mock.blink();
+  await expect(page.locator('.toast--error')).toContainText('TV 전원이 꺼져 있습니다');
+  await expect(page.locator('.radial-overlay')).toBeVisible();
+});
+
+test('missing Arduino acknowledgement is an error and keeps the command menu open', async ({ page }) => {
+  const mock = await mockRoom(page, { serial: true, commandSilence: true });
+  await mock.enterRoom();
+  await mock.menu('LIGHT');
+  await mock.blink();
+  await expect(page.locator('.toast--error')).toContainText('응답 시간이 초과되었습니다', { timeout: 5_000 });
+  await expect(page.locator('.radial-overlay')).toBeVisible();
+  expect(mock.requests.filter((url) => url.startsWith('/events/command'))).toEqual([]);
+});
+
+test('blink begun during rotation transition executes no command', async ({ page }) => {
+  const mock = await mockRoom(page, { serial: true });
+  await mock.enterRoom();
+  await pauseClock(page);
+  await mock.menu('FAN');
+  await page.clock.runFor(2000);
+  await expect(page.locator('.radial-overlay')).toHaveClass(/is-transitioning/);
+  mock.emit({ is_blinking: true });
+  mock.emit({ is_blinking: false, blink_sequence: 1, last_blink_event: 'SELECT' });
+  await expect(page.locator('.toast--info')).toContainText('항목 이동이 끝난 뒤 다시 선택해주세요');
+  expect(mock.requests.filter((url) => url.startsWith('/events/command'))).toEqual([]);
+});
+
+test('TV display follows websocket channel and power state', async ({ page }) => {
+  const mock = await mockRoom(page);
+  await page.goto('/tv-display');
+  await expect(page.getByLabel('CH 1 자연')).toHaveAttribute('src', '/tv/channels/channel_01_nature.mp4');
+  await expect(page.getByLabel('CH 1 자연')).toHaveAttribute('poster', '/tv/channels/channel_01_nature.jpg');
+  mock.emit({ tv: { power: true, channel: 2, volume: 50, mute: false, revision: 1 }, last_command: 'TV_CHANNEL_NEXT' });
+  await expect(page.getByLabel('CH 2 바다')).toHaveAttribute('src', '/tv/channels/channel_02_ocean.mp4');
+  await expect(page.getByLabel('CH 2 바다')).toHaveAttribute('poster', '/tv/channels/channel_02_ocean.jpg');
+  await page.screenshot({ path: '../../docs/ui-redesign/after-tv-display.png', fullPage: true });
+  mock.emit({ tv: { power: false, channel: 2, volume: 50, mute: false, revision: 2 }, last_command: 'TV_POWER_TOGGLE' });
+  await expect(page.locator('.tv-display--off')).toBeVisible();
+});
 
 test('gaze visual geometry is preserved and every unsafe state hides the knob', async ({ page }, info) => {
   const mock = await mockRoom(page);

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, asdict
+import json
+from dataclasses import dataclass, asdict, field
 import time
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -9,7 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .blink import BlinkEventType, BlinkStateMachine, EmergencyBlinkDetector
 from .gaze import GazeClassifier, GazePoint
+from .runtime_settings import load_learning_enabled, save_learning_enabled
+from .learning_gate import ROOM_LEASE_SECONDS
 from .vision import GazeSample, VisionGazeTracker
+
+
+@dataclass
+class TVState:
+    power: bool = True
+    channel: int = 1
+    volume: int = 50
+    mute: bool = False
+    revision: int = 0
 
 
 @dataclass
@@ -43,9 +55,11 @@ class ControlState:
     eye_aspect_ratio: float = 0.0
     gaze_ready: bool = False
     learning_enabled: bool = True
+    learning_active: bool = False
     learning_update_count: int = 0
     emergency_active: bool = False
     emergency_sequence: int = 0
+    tv: TVState = field(default_factory=TVState)
 
 
 app = FastAPI(title="EyeCan Room API", version="0.1.0")
@@ -57,17 +71,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-state = ControlState()
+state = ControlState(learning_enabled=load_learning_enabled())
 blink_machine = BlinkStateMachine()
 emergency_detector = EmergencyBlinkDetector()
 gaze_classifier = GazeClassifier()
 vision_tracker = VisionGazeTracker()
 active_websockets: set[WebSocket] = set()
+room_video_leases: dict[WebSocket, float] = {}
 main_loop: asyncio.AbstractEventLoop | None = None
 
 
 def state_payload() -> dict[str, object]:
-    return asdict(state)
+    payload = asdict(state)
+    payload['learning_active'] = (state.learning_active and state.learning_enabled and
+                                  vision_tracker.status == 'RUNNING' and
+                                  max(room_video_leases.values(), default=0.0) > time.monotonic())
+    return payload
 
 
 def reset_scan_position() -> None:
@@ -202,7 +221,7 @@ def receive_vision_sample(sample: GazeSample) -> None:
     state.face_detected = sample.face_detected
     state.eye_aspect_ratio = sample.ear
     state.gaze_ready = sample.ready
-    state.learning_enabled = sample.learning_enabled
+    state.learning_active = sample.learning_active
     state.learning_update_count = sample.learning_update_count
     # 얼굴을 놓치면 sample.omega_x/y가 이미 0.0으로 오므로, 여기서 얼굴 검출 여부와
     # 무관하게 그대로 반영하면 "얼굴 인식 실패 시 팬틸트 정지"까지 자연히 해결된다.
@@ -236,12 +255,17 @@ def receive_vision_sample(sample: GazeSample) -> None:
 async def start_vision(camera_index: int = -1) -> dict[str, object]:
     blink_machine.reset()
     emergency_detector.reset()
-    vision_tracker.start(camera_index=camera_index, on_sample=receive_vision_sample)
+    vision_tracker.start(
+        camera_index=camera_index,
+        on_sample=receive_vision_sample,
+        learning_enabled=state.learning_enabled,
+    )
     state.gaze_error_x = 0.0
     state.gaze_error_y = 0.0
     state.gaze_omega_x = 0.0
     state.gaze_omega_y = 0.0
     state.sample_sequence = 0
+    state.learning_active = False
     state.tracking_session_id = vision_tracker.tracking_session_id
     state.vision_status = vision_tracker.status
     state.vision_error = vision_tracker.error
@@ -251,11 +275,48 @@ async def start_vision(camera_index: int = -1) -> dict[str, object]:
 
 @app.post("/vision/learning")
 async def set_vision_learning(enabled: bool) -> dict[str, object]:
-    if not vision_tracker.send_control("learning", enabled=enabled):
-        raise HTTPException(status_code=409, detail="Vision tracker is not running")
+    if vision_tracker.status in {"RUNNING", "STARTING"}:
+        result = await asyncio.to_thread(
+            vision_tracker.send_control_and_wait,
+            "learning",
+            enabled=enabled,
+        )
+        if not result or not result.get("ok"):
+            detail = result.get("error") if result else "Vision tracker is not running"
+            raise HTTPException(status_code=409, detail=detail)
+    save_learning_enabled(enabled)
     state.learning_enabled = enabled
     await broadcast_state()
     return state_payload()
+
+
+@app.post("/tv/command")
+async def control_tv(command: str) -> dict[str, object]:
+    command = command.upper()
+    if command == "POWER_TOGGLE":
+        state.tv.power = not state.tv.power
+    elif command in {"CHANNEL_NEXT", "CHANNEL_PREV", "VOLUME_UP", "VOLUME_DOWN", "MUTE_TOGGLE"}:
+        if not state.tv.power:
+            raise HTTPException(status_code=409, detail="TV 전원이 꺼져 있습니다")
+        if command == "CHANNEL_NEXT":
+            state.tv.channel = state.tv.channel % 3 + 1
+        elif command == "CHANNEL_PREV":
+            state.tv.channel = (state.tv.channel - 2) % 3 + 1
+        elif command == "VOLUME_UP":
+            state.tv.volume = min(100, state.tv.volume + 10)
+            state.tv.mute = False
+        elif command == "VOLUME_DOWN":
+            state.tv.volume = max(0, state.tv.volume - 10)
+            state.tv.mute = state.tv.volume == 0
+        else:
+            state.tv.mute = not state.tv.mute
+    else:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 TV 명령입니다: {command}")
+
+    state.tv.revision += 1
+    state.last_command = f"TV_{command}"
+    await broadcast_state()
+    return {"accepted": True, "tv": asdict(state.tv)}
 
 
 @app.post("/vision/model/save")
@@ -296,6 +357,7 @@ async def dismiss_emergency() -> dict[str, object]:
 @app.post("/vision/stop")
 async def stop_vision() -> dict[str, object]:
     vision_tracker.stop()
+    state.learning_active = False
     state.vision_status = vision_tracker.status
     await broadcast_state()
     return state_payload()
@@ -317,8 +379,23 @@ async def ws_state(websocket: WebSocket) -> None:
 
     try:
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            try:
+                payload = json.loads(message)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(payload, dict) or payload.get('type') != 'room_video_visibility':
+                continue
+            if payload.get('visible') is True:
+                room_video_leases[websocket] = time.monotonic() + ROOM_LEASE_SECONDS
+            else:
+                room_video_leases.pop(websocket, None)
+            vision_tracker.send_control('room_visibility', expires_at=max(room_video_leases.values(), default=0.0))
     except WebSocketDisconnect:
         active_websockets.discard(websocket)
     except Exception:
         active_websockets.discard(websocket)
+    finally:
+        active_websockets.discard(websocket)
+        room_video_leases.pop(websocket, None)
+        vision_tracker.send_control('room_visibility', expires_at=max(room_video_leases.values(), default=0.0))

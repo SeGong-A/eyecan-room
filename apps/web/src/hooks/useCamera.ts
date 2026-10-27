@@ -151,7 +151,10 @@ export function useCamera(defaultFacingMode: CameraFacingMode = 'user') {
     }
   }, []);
 
+  const getVideoElement = useCallback(() => nodeRef.current, []);
+
   return {
+    getVideoElement,
     videoRef,
     status,
     devices,

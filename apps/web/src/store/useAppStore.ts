@@ -6,7 +6,8 @@ import type {
   InteractionMode,
   ScanTarget,
   SettingsMenu,
-  ThemeMode
+  ThemeMode,
+  TVState
 } from '../types/control';
 
 export type {
@@ -21,7 +22,7 @@ export type {
 } from '../types/control';
 
 const MAX_ARDUINO_LOG_LINES = 8;
-const initialArduinoLevels: ArduinoLevels = { light: 0, fan: 0, pan: 90, tilt: 20, servo: 90 };
+const initialArduinoLevels: ArduinoLevels = { light: 0, fan: 0, pan: 152, tilt: 16, servo: 90 };
 
 const storedScanInterval = Number(window.localStorage.getItem('eyecan.scanIntervalMs'));
 const initialScanIntervalMs = Number.isFinite(storedScanInterval) && storedScanInterval >= 1000 && storedScanInterval <= 5000
@@ -63,7 +64,9 @@ export type AppState = {
   eyeAspectRatio: number;
   gazeReady: boolean;
   learningEnabled: boolean;
+  learningActive: boolean;
   learningUpdateCount: number;
+  tv: TVState;
   emergencyActive: boolean;
   emergencySequence: number;
   arduinoStatus: ArduinoStatus;
@@ -127,7 +130,9 @@ export type AppState = {
     eye_aspect_ratio: number;
     gaze_ready: boolean;
     learning_enabled: boolean;
+    learning_active: boolean;
     learning_update_count: number;
+    tv: TVState;
     emergency_active: boolean;
     emergency_sequence: number;
   }>) => void;
@@ -162,7 +167,9 @@ export const useAppStore = create<AppState>((set) => ({
   eyeAspectRatio: 0,
   gazeReady: false,
   learningEnabled: true,
+  learningActive: false,
   learningUpdateCount: 0,
+  tv: { power: true, channel: 1, volume: 50, mute: false, revision: 0 },
   emergencyActive: false,
   emergencySequence: 0,
   arduinoStatus: 'DISCONNECTED',
@@ -224,13 +231,14 @@ export const useAppStore = create<AppState>((set) => ({
   syncFromServer: (payload) =>
     set((state) => {
       const serverInteractionMode = payload.interaction_mode ?? state.interactionMode;
-      const interactionMode =
-        state.interactionMode !== 'EXPLORE' && serverInteractionMode === 'EXPLORE'
+      const interactionMode = payload.emergency_active === true
+        ? 'EXPLORE'
+        : state.interactionMode !== 'EXPLORE' && serverInteractionMode === 'EXPLORE'
           ? state.interactionMode
           : serverInteractionMode;
       return {
         gazeDirection: payload.gaze_direction ?? state.gazeDirection,
-        selectedTarget: payload.selected_target && payload.selected_target in { FAN: 1, LIGHT: 1, CURTAIN: 1 }
+        selectedTarget: payload.selected_target && payload.selected_target in { FAN: 1, LIGHT: 1, CURTAIN: 1, TV: 1 }
           ? payload.selected_target
           : state.selectedTarget,
         interactionMode,
@@ -250,7 +258,9 @@ export const useAppStore = create<AppState>((set) => ({
         eyeAspectRatio: payload.eye_aspect_ratio ?? state.eyeAspectRatio,
         gazeReady: payload.gaze_ready ?? state.gazeReady,
         learningEnabled: payload.learning_enabled ?? state.learningEnabled,
+        learningActive: payload.learning_active ?? state.learningActive,
         learningUpdateCount: payload.learning_update_count ?? state.learningUpdateCount,
+        tv: payload.tv ? { ...state.tv, ...payload.tv } : state.tv,
         emergencyActive: payload.emergency_active ?? state.emergencyActive,
         emergencySequence: payload.emergency_sequence ?? state.emergencySequence,
         lastGazePoint: {

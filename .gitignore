@@ -216,6 +216,7 @@ apps/web/dist/
 apps/web/.vite/
 apps/api/.venv/
 apps/api/__pycache__/
+apps/api/.runtime/
 apps/api/app/adaptive_calibration_model.zip
 apps/api/app/face_landmarker.task
 Gaze_control_RL/residual_gaze_model_v3_personalized.zip
@@ -230,6 +231,10 @@ tempCodeRunnerFile.py
 
 # PyPI configuration file
 .pypirc
+apps/api/models/objects/*.pt
+apps/api/models/objects/*.download
+apps/api/.test-artifacts/
+/tv_assets/
 
 # Marimo
 marimo/_static/
