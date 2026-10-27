@@ -21,14 +21,19 @@ class FakeTrainer:
 
     def __init__(self) -> None:
         self.stored: list[tuple] = []
+        self.deterministic_values: list[bool] = []
 
     def sample_action(self, obs, deterministic: bool):
+        self.deterministic_values.append(deterministic)
         return np.zeros(4, dtype=np.float32), 0.0, 0.0
 
     def store(self, *transition) -> None:
         self.stored.append(transition)
 
     def reset(self) -> None:
+        self.stored.clear()
+
+    def clear(self) -> None:
         self.stored.clear()
 
 
@@ -61,6 +66,19 @@ def make_controller(samples: list[tuple[tuple[float, float], float]]) -> Adaptiv
 
 
 class AdaptiveGazeControllerTest(unittest.TestCase):
+    def test_learning_toggle_only_gates_experience_updates(self) -> None:
+        samples = [((0.0, 0.0), 0.3)] * 15 + [((0.4, 0.0), 0.3)] * 2
+        controller = make_controller(samples)
+        controller.trainer.stored.append(("old",))
+        controller.set_learning(False)
+        self.assertEqual(controller.trainer.stored, [])
+        with patch('app.adaptive_gaze.time.time', side_effect=[index / 30 for index in range(1, 18)]):
+            for _ in range(17):
+                controller.update(None)
+        self.assertEqual(controller.trainer.stored, [])
+        self.assertTrue(controller.trainer.deterministic_values)
+        self.assertTrue(all(value is False for value in controller.trainer.deterministic_values))
+
     def test_initial_zero_uses_fifteen_open_eye_samples(self) -> None:
         samples = [((0.1, -0.05), 0.3)] * 10 + [((9.0, 9.0), 0.1)] * 4 + [((0.1, -0.05), 0.3)] * 5
         controller = make_controller(samples)

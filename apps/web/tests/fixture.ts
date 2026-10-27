@@ -1,28 +1,44 @@
 import { expect, type Page, type WebSocketRoute } from '@playwright/test';
 
-type Options = { serial?: boolean; theme?: 'light' | 'dark'; cameraError?: string; homeFailure?: 'silent' | 'wrong-angle' };
+type Options = {
+  serial?: boolean;
+  theme?: 'light' | 'dark';
+  cameraError?: string;
+  homeFailure?: 'silent' | 'wrong-angle';
+  commandSilence?: boolean;
+};
 
 // All camera, serial and API traffic is isolated from the user's running devices.
 export async function mockRoom(page: Page, options: Options = {}) {
   const sockets = new Set<WebSocketRoute>();
   const requests: string[] = [];
+  const clientMessages: Record<string, unknown>[] = [];
   let state: Record<string, unknown> = {
     connection_state: 'STREAMING', vision_status: 'STOPPED', vision_error: null,
     face_detected: false, gaze_ready: false, scan_interval_ms: 2000,
     interaction_mode: 'EXPLORE', selected_target: 'FAN', learning_enabled: true,
     gaze_error_x: 0.08, gaze_error_y: -0.04, gaze_deadzone: 0.03,
-    emergency_active: false, sample_sequence: 1, tracking_session_id: 'mock-ui-session'
+    emergency_active: false, sample_sequence: 1, tracking_session_id: 'mock-ui-session',
+    tv: { power: true, channel: 1, volume: 50, mute: false, revision: 0 }
   };
   const emit = (patch: Record<string, unknown>) => {
     state = { ...state, ...patch };
     for (const socket of sockets) socket.send(JSON.stringify(state));
   };
+  let blinkSequence = 0;
+  const blink = async (event = 'SELECT') => {
+    emit({ is_blinking: true });
+    await page.waitForTimeout(40);
+    emit({ is_blinking: false, blink_sequence: ++blinkSequence, last_blink_event: event });
+    await page.waitForTimeout(40);
+  };
   await page.routeWebSocket('**/ws/state', (socket) => {
     sockets.add(socket);
     socket.send(JSON.stringify(state));
     socket.onClose(() => sockets.delete(socket));
+    socket.onMessage(message => { try { clientMessages.push(JSON.parse(message.toString())); } catch { /* Non-JSON client messages are irrelevant here. */ } });
   });
-  await page.route(/\/(vision|state|events|emergency|health)(\/|\?|$)/, async (route) => {
+  await page.route(/\/(vision|state|events|emergency|health|tv)(\/|\?|$)/, async (route) => {
     const url = new URL(route.request().url());
     requests.push(`${url.pathname}${url.search}`);
     if (url.pathname === '/vision/start') emit({ vision_status: 'STARTING', vision_error: null });
@@ -31,14 +47,32 @@ export async function mockRoom(page: Page, options: Options = {}) {
     if (url.pathname === '/state/scan-speed') emit({ scan_interval_ms: Number(url.searchParams.get('scan_interval_ms')) });
     if (url.pathname === '/vision/learning') emit({ learning_enabled: url.searchParams.get('enabled') === 'true' });
     if (url.pathname === '/emergency/clear') emit({ emergency_active: false, interaction_mode: 'EXPLORE' });
+    if (url.pathname === '/tv/command') {
+      const tv = { ...(state.tv as { power: boolean; channel: number; volume: number; mute: boolean; revision: number }) };
+      const command = url.searchParams.get('command');
+      if (!tv.power && command !== 'POWER_TOGGLE') {
+        await route.fulfill({ status: 409, json: { detail: 'TV 전원이 꺼져 있습니다' } });
+        return;
+      }
+      if (command === 'POWER_TOGGLE') tv.power = !tv.power;
+      if (command === 'CHANNEL_NEXT') tv.channel = tv.channel % 3 + 1;
+      if (command === 'CHANNEL_PREV') tv.channel = (tv.channel + 1) % 3 + 1;
+      if (command === 'VOLUME_UP') { tv.volume = Math.min(100, tv.volume + 10); tv.mute = false; }
+      if (command === 'VOLUME_DOWN') { tv.volume = Math.max(0, tv.volume - 10); tv.mute = tv.volume === 0; }
+      tv.revision += 1;
+      emit({ tv, last_command: `TV_${command}` });
+      await route.fulfill({ json: { accepted: true, tv } });
+      return;
+    }
     await route.fulfill({ json: state });
   });
-  await page.addInitScript(({ serial, theme, cameraError, homeFailure }) => {
+  await page.addInitScript(({ serial, theme, cameraError, homeFailure, commandSilence }) => {
     if (theme) localStorage.setItem('eyecan.themeMode', theme);
     const win = window as typeof window & {
       mockCameraError?: string; mockVideoTrack?: MediaStreamTrack; serialWrites: string[];
       serialReject?: boolean; serialDisconnect?: () => void; mockVideoTone?: string;
       mockAngle?: (pan: number, tilt: number) => void;
+      mockHoldFailure?: boolean;
     };
     win.mockCameraError = cameraError;
     const devices = [
@@ -86,17 +120,21 @@ export async function mockRoom(page: Page, options: Options = {}) {
         this.writable = new WritableStream({ write(bytes) {
           const command = new TextDecoder().decode(bytes).trim();
           win.serialWrites.push(command);
+          if (command.startsWith('H ') && win.mockHoldFailure) return;
           if (/^[QHV] /.test(command)) { line(`A ${command.split(' ')[1]} ${pan * 10} ${tilt * 10}`); return; }
           if (command === 'm') { menu = 'm'; line('========================'); return; }
           if (menu === 'm') { menu = command; return; }
           if (menu === '1' && command === 'c') {
             if (homeFailure === 'silent') return;
-            if (homeFailure !== 'wrong-angle') { pan = 90; tilt = 20; }
+            if (homeFailure !== 'wrong-angle') { pan = 152; tilt = 16; }
             line('[중앙 복귀] Pan/Tilt | 계속 입력하거나 m으로 메뉴 복귀');
             return;
           }
           if (win.serialReject) { line('잘못된 입력'); return; }
-          if (menu === '2') line(`서보모터 이동 완료 -> 각도: ${command}`);
+          if (commandSilence) return;
+          if (menu === '2' && command === 'o') line('커튼 열기 시작');
+          if (menu === '2' && command === 'k') line('커튼 닫기 시작');
+          if (menu === '2' && command === 's') line('커튼 정지');
           if (menu === '3') line(`조명 밝기 변경 -> Level ${command}`);
           if (menu === '4') line(`선풍기 속도 변경 -> Level ${command}`);
         } });
@@ -124,12 +162,12 @@ export async function mockRoom(page: Page, options: Options = {}) {
     await goToCamera();
     await page.getByRole('button', { name: '외장 카메라 연결', exact: true }).click();
     await expect(page.locator('.room-video')).toBeVisible();
-    if (options.serial) await expect(page.locator('.connection-trigger')).toContainText('연결됨');
+    if (options.serial) await expect(page.locator('.connection-trigger')).toContainText('연결됨', { timeout: 15_000 });
     if (await page.getByRole('button', { name: '알림 닫기' }).isVisible()) await page.getByRole('button', { name: '알림 닫기' }).click();
   };
   const menu = async (target: string) => {
     emit({ interaction_mode: 'COMMAND', selected_target: target });
     await expect(page.locator('.radial-overlay')).toBeVisible();
   };
-  return { emit, requests, goToEye, goToCamera, enterRoom, menu };
+  return { emit, blink, requests, clientMessages, goToEye, goToCamera, enterRoom, menu };
 }

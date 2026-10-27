@@ -7,6 +7,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
+      '/objects': { target: 'http://127.0.0.1:8001', changeOrigin: true },
       '/health': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true
@@ -24,6 +25,10 @@ export default defineConfig({
         changeOrigin: true
       },
       '/vision': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true
+      },
+      '/tv/command': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true
       },

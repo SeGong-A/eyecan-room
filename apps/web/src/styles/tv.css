@@ -1,0 +1,12 @@
+.tv-display { position: fixed; inset: 0; overflow: hidden; display: grid; place-items: center; color: #fff; background: #0e2f5b center / cover no-repeat; }
+.tv-display--off { background: #000; }
+.tv-channel--care { background: #0e2f5b; }
+.tv-channel--room { background: #315f70; }
+.tv-channel--rest { background: #3f5f59; }
+.tv-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tv-display-header { position: absolute; z-index: 4; top: 24px; left: 28px; right: 28px; display: flex; justify-content: space-between; align-items: center; }
+.tv-display-header .button { min-height: 48px; background: rgb(255 255 255 / 92%); color: #18334f; }
+.tv-sync { padding: 8px 12px; border: 1px solid rgb(255 255 255 / 35%); border-radius: 8px; background: rgb(14 47 91 / 72%); font-size: 14px; }
+.tv-sync::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #d6e0e6; }
+.tv-sync.is-connected::before { background: #8ce0c4; }
+.tv-play-button { position: absolute; z-index: 5; left: 50%; bottom: 48px; transform: translateX(-50%); }

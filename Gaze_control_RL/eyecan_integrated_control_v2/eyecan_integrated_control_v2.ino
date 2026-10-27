@@ -33,21 +33,24 @@
 const int LIGHT_PIN = 3;
 // D5/D6를 각각 커튼/선풍기로 나눠 썼을 때 한쪽 명령에 다른 쪽 장치가 반응하는
 // 현상이 있어서(브레드보드 인접 핀 간섭으로 추정), 두 핀을 서로 멀리 떨어뜨려
-// 재배선했다: 커튼=5번, 선풍기=11번(3,11은 Timer2 공유지만 analogWrite는 서로
-// 독립적으로 듀티비를 설정할 수 있어 조명(3번)과 간섭 없음).
+// 재배선했다: 커튼=5번, 선풍기=11번. Servo 라이브러리가 Timer1을 사용하므로
+// PWM이 비활성화되는 D9/D10은 선풍기 속도 제어에 사용하지 않는다.
 const int EXTRA_SERVO_PIN = 5;
 const int FAN_PIN = 11;
 const int CAM_PAN_PIN = 8;
 const int CAM_TILT_PIN = 9;
 
 const int STEP_SIZE = 45;
-const int PAN_HOME_ANGLE = 90;
-const int TILT_HOME_ANGLE = 20;
+// 설치된 카메라가 실제 TV 정면을 바라보는 실측 기준점이다.
+const int PAN_HOME_ANGLE = 152;
+const int TILT_HOME_ANGLE = 16;
 // 틸트가 0까지 내려가면 카메라가 바닥을 향해 너무 많이 숙여져서, 하한을 0 대신
 // 이 값으로 둔다. 실측해서 더 적절한 값(더 낮게/높게)이 있으면 이 숫자만 바꾸면 된다.
 const int TILT_MIN_ANGLE = 10;
 const int EXTRA_HOME_ANGLE = 90;
 const int FAN_MIN_PWM = 120;
+// 팬과 팬틸트가 같은 전원을 사용할 때 전압 강하가 생기지 않도록 최대 듀티를 제한한다.
+const int FAN_MAX_PWM = 180;
 const unsigned long MOTION_TICK_MS = 20;
 const unsigned long MOTION_TIMEOUT_MS = 300;
 const int MAX_VELOCITY_10 = 300;
@@ -137,7 +140,7 @@ int levelToLightPwm(int level) {
 
 int levelToFanPwm(int level) {
   if (level == 0) return 0;
-  return map(level, 1, 10, FAN_MIN_PWM, 255);
+  return map(level, 1, 10, FAN_MIN_PWM, FAN_MAX_PWM);
 }
 
 void applyPwmLevel(int pin, int pwmValue) {

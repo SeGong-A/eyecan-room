@@ -1,14 +1,13 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, Eye } from 'lucide-react';
+import { Eye } from 'lucide-react';
 import type { CommandItem, TargetMeta } from '../types/control';
-import { Button } from './ui';
 
 type Props = {
   activeScanStep: number; rotationStep: number; currentItem: CommandItem; radialTarget: TargetMeta;
-  scanIntervalMs: number; scanList: CommandItem[]; paused: boolean; busy: boolean; status?: string; onSelectCurrent: () => void;
+  scanIntervalMs: number; scanList: CommandItem[]; paused: boolean; transitioning: boolean; busy: boolean; status?: string;
 };
 
-export function RadialControl({ activeScanStep, rotationStep, currentItem, radialTarget, scanIntervalMs, scanList, paused, busy, status, onSelectCurrent }: Props) {
+export function RadialControl({ activeScanStep, rotationStep, currentItem, radialTarget, scanIntervalMs, scanList, paused, transitioning, busy, status }: Props) {
   const areaRef = useRef<HTMLDivElement>(null);
   const [radius, setRadius] = useState(112);
   useLayoutEffect(() => {
@@ -28,15 +27,15 @@ export function RadialControl({ activeScanStep, rotationStep, currentItem, radia
   const rotation = -rotationStep * (360 / scanList.length);
   const TargetIcon = radialTarget.icon;
 
-  return <section className="radial-overlay" aria-label={`${radialTarget.name} 선택 메뉴`}>
+  return <section className={`radial-overlay ${transitioning ? 'is-transitioning' : ''}`} aria-label={`${radialTarget.name} 선택 메뉴`} aria-busy={busy || undefined}>
     <div className="radial-area" ref={areaRef} style={{ '--wheel-radius': `${radius}px` } as CSSProperties}>
       <div className="radial-orbit" aria-hidden="true" />
       <div className="command-wheel" style={{ '--wheel-rotation': `${rotation}deg` } as CSSProperties}>
         {scanList.map((item, index) => {
           const angle = index * 2 * Math.PI / scanList.length;
           const Icon = item.icon;
-          return <div key={item.command} className={`radial-command ${index === activeScanStep ? 'active' : ''}`}
-            data-command={item.command} aria-current={index === activeScanStep ? 'true' : undefined}
+          return <div key={item.id ?? item.command} className={`radial-command ${index === activeScanStep ? 'active' : ''}`}
+            data-command={item.command} data-item-id={item.id ?? item.command} aria-current={index === activeScanStep ? 'true' : undefined}
             style={{ '--item-x': `${Math.sin(angle) * radius}px`, '--item-y': `${-Math.cos(angle) * radius}px`, '--counter-rotation': `${-rotation}deg` } as CSSProperties}>
             <Icon size={22} strokeWidth={1.8} aria-hidden="true" /><strong>{item.label}</strong>
           </div>;
@@ -48,8 +47,6 @@ export function RadialControl({ activeScanStep, rotationStep, currentItem, radia
           style={{ animationDuration: `${scanIntervalMs}ms`, animationPlayState: paused ? 'paused' : 'running' }} />
       </svg>
     </div>
-    <div className="radial-current"><div className="current-command"><Eye size={22} aria-hidden="true" /><div><span>{paused ? '선택 일시정지' : '현재 선택'}</span><strong aria-live="polite" aria-atomic="true">{currentItem.label}</strong></div></div>
-      <Button onClick={onSelectCurrent} disabled={paused} busy={busy} icon={<Check size={20} aria-hidden="true" />}>선택</Button>
-    </div>
+    <div className="radial-current"><div className="current-command"><Eye size={22} aria-hidden="true" /><div><span>{paused ? '선택 일시정지' : '현재 선택'}</span><strong aria-live="polite" aria-atomic="true">{currentItem.label}</strong></div></div></div>
   </section>;
 }

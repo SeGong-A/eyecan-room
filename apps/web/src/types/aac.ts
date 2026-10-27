@@ -1,0 +1,9 @@
+export const aacObjectTypes = ['cup', 'bottle', 'cell_phone', 'tissue_box'] as const;
+export type AacObjectType = typeof aacObjectTypes[number];
+export type AacPhase = 'IDLE' | 'ENTERING' | 'OBJECT_SCAN' | 'REQUEST_SCAN' | 'SPEAKING';
+export type Box = { x: number; y: number; width: number; height: number };
+export type Detection = { type: AacObjectType; confidence: number; bbox: Box };
+export type DetectionResponse = { sessionId: string; frameId: number; capturedAtMs: number; inferenceMs: number; detections: Detection[] };
+export type Track = Detection & { id: number; hits: number[]; lastSeen: number; stable: boolean };
+export type DetectionHealth = { status: 'LOADING' | 'READY' | 'ERROR'; supportedTypes: AacObjectType[]; modelId: string | null; error: string | null };
+export type AacLog = { event: string; at: string; elapsedMs: number; detail?: string };

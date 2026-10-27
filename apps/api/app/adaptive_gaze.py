@@ -170,6 +170,10 @@ class AdaptiveGazeController:
         self.last_time = time.time()
 
     def set_learning(self, enabled: bool) -> None:
+        if self.learning_enabled and not enabled:
+            # Do not let samples collected before a pause trigger an update when
+            # learning is enabled again. This clears experience only, not weights.
+            self.trainer.clear()
         self.learning_enabled = enabled
 
     def save(self) -> None:
@@ -259,7 +263,9 @@ class AdaptiveGazeController:
                 self.initial_calib_done = True
             x_err_raw = u - self.c
             obs = np.concatenate([x_err_raw, v, var, [float(self.zero_crossings)]]).astype(np.float32)
-            action, value, log_prob = self.trainer.sample_action(obs, deterministic=not self.learning_enabled)
+            # Learning controls optimizer updates only. Inference must not change
+            # mode when the caregiver pauses weight updates.
+            action, value, log_prob = self.trainer.sample_action(obs, deterministic=False)
             self.d = float(np.clip(self.base_d + action[0] * 0.02, 0.02, 0.12))
             self.kp = float(np.clip(self.base_kp + action[1] * 0.5, 0.7, 3.5))
             calib_rate = float(np.clip(0.08 + action[2] * 0.04, 0.02, 0.15))
